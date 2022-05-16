@@ -54,7 +54,6 @@ from .camera.three_d_camera import *
 from .constants import *
 from .mobject.frame import *
 from .mobject.geometry.arc import *
-from .mobject.geometry.boolean_ops import *
 from .mobject.geometry.line import *
 from .mobject.geometry.polygram import *
 from .mobject.geometry.shape_matchers import *
@@ -108,6 +107,13 @@ from .utils.sounds import *
 from .utils.space_ops import *
 from .utils.tex import *
 from .utils.tex_templates import *
+
+try:
+    from .mobject.geometry.boolean_ops import *
+except ImportError:
+    logger.warning(
+        "The boolean operations module is unavailable due to a missing dependency."
+    )
 
 try:
     from IPython import get_ipython

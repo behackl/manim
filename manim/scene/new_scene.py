@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 from tqdm import tqdm as ProgressDisplay
 
+from ..constants import RendererType
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -20,7 +22,7 @@ class Scene:
     def __init__(
         self,
         *,
-        camera_class: Type[Camera] | None = None,
+        camera_class: Type[Camera] | None = None,
         always_update_mobjects: bool = False,
         random_seed: int | None = 0,
         render_from_animation_number: int | None = None,
@@ -37,7 +39,7 @@ class Scene:
         else:
             self.window = None
 
-        camera_class = OpenGLCamera if config.renderer == "opengl" else CairoCamera
+        camera_class = OpenGLCamera if config.renderer == RendererType.OPENGL else CairoCamera
         self.camera: Type[Camera] = camera_class()
         self.file_writer: SceneFileWriter = SceneFileWriter(self)
         self.mobjects: list[Mobject] = []

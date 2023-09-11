@@ -3,6 +3,8 @@
 
 from manim import *
 
+# asdf
+
 # To watch one of these scenes, run the following:
 # python --quality m manim -p example_scenes.py SquareToCircle
 #

@@ -68,27 +68,67 @@ class AnimationGroup(Animation):
             mobjects = remove_list_redundancies(
                 [anim.mobject for anim in self.animations if not anim.is_introducer()],
             )
-            if config["renderer"] == RendererType.OPENGL:
+            if config.renderer == RendererType.OPENGL:
                 self.group = OpenGLGroup(*mobjects)
             else:
                 self.group = Group(*mobjects)
+        self._anims_with_timings = []
         super().__init__(
             self.group, rate_func=self.rate_func, lag_ratio=lag_ratio, **kwargs
         )
-        self.run_time: float = self.init_run_time(run_time)
+
+        self._run_time = run_time
+        self.build_animations_with_timings()
+        self.update_max_run_time()
+
+    
+    @property
+    def run_time(self) -> float:
+        if self._run_time is None:
+            return self.max_end_time
+        return self._run_time
+    
+    @run_time.setter
+    def run_time(self, value: float) -> None:
+        self._run_time = value
 
     def get_all_mobjects(self) -> Sequence[Mobject]:
         return list(self.group)
+    
+    def add(self, animation: Animation, start_time: float | None = None) -> None:
+        """Adds an animation to the group.
+
+        Parameters
+        ----------
+        animation
+            The animation to be added.
+        start_at
+            The time at which the animation should start. If ``None``
+            (the default), the animation will be queued at the end
+            of the group.
+        """
+        animation = prepare_animation(animation)
+        self.animations.append(animation)
+        self.group.add(animation.mobject)
+        if start_time is None:
+            start_time = self.max_end_time
+        end_time = start_time + animation.get_run_time()
+        self._anims_with_timings.append((animation, start_time, end_time))
+        self.update_max_run_time()
 
     def begin(self) -> None:
-        if self.suspend_mobject_updating:
-            self.group.suspend_updating()
-        for anim in self.animations:
-            anim.begin()
+        pass
 
     def _setup_scene(self, scene) -> None:
-        for anim in self.animations:
-            anim._setup_scene(scene)
+        self._scene = scene
+        for (anim, start_time, _) in self._anims_with_timings:
+            anim._has_finished = False
+            if start_time == 0:
+                anim._setup_scene(scene)
+                anim.begin()
+                anim._has_begun = True
+            else:
+                anim._has_begun = False
 
     def finish(self) -> None:
         for anim in self.animations:
@@ -105,9 +145,10 @@ class AnimationGroup(Animation):
 
     def update_mobjects(self, dt: float) -> None:
         for anim in self.animations:
-            anim.update_mobjects(dt)
+            if anim._has_begun and not anim._has_finished:
+                anim.update_mobjects(dt)
 
-    def init_run_time(self, run_time) -> float:
+    def update_max_run_time(self) -> None:
         """Calculates the run time of the animation, if different from ``run_time``.
 
         Parameters
@@ -120,21 +161,19 @@ class AnimationGroup(Animation):
         run_time
             The duration of the animation in seconds.
         """
-        self.build_animations_with_timings()
-        if self.anims_with_timings:
-            self.max_end_time = np.max([awt[2] for awt in self.anims_with_timings])
+        if self._anims_with_timings:
+            self.max_end_time = np.max([awt[2] for awt in self._anims_with_timings])
         else:
             self.max_end_time = 0
-        return self.max_end_time if run_time is None else run_time
+        
 
     def build_animations_with_timings(self) -> None:
         """Creates a list of triplets of the form (anim, start_time, end_time)."""
-        self.anims_with_timings = []
         curr_time: float = 0
         for anim in self.animations:
             start_time: float = curr_time
             end_time: float = start_time + anim.get_run_time()
-            self.anims_with_timings.append((anim, start_time, end_time))
+            self._anims_with_timings.append((anim, start_time, end_time))
             # Start time of next animation is based on the lag_ratio
             curr_time = (1 - self.lag_ratio) * start_time + self.lag_ratio * end_time
 
@@ -145,13 +184,24 @@ class AnimationGroup(Animation):
         # e.g. of the surrounding scene.  Instead they'd
         # be a rescaled version.  But that's okay!
         time = self.rate_func(alpha) * self.max_end_time
-        for anim, start_time, end_time in self.anims_with_timings:
+        for anim, start_time, end_time in self._anims_with_timings:
             anim_time = end_time - start_time
             if anim_time == 0:
                 sub_alpha = 0
             else:
                 sub_alpha = np.clip((time - start_time) / anim_time, 0, 1)
-            anim.interpolate(sub_alpha)
+                if sub_alpha == 0 and time + 1 / config.frame_rate >= start_time:
+                    if not anim._has_begun:
+                        anim._setup_scene(self._scene)
+                        anim.begin()
+                        anim._has_begun = True
+
+            if anim._has_begun and not anim._has_finished:
+                anim.interpolate(sub_alpha)
+
+                if sub_alpha == 1:
+                    anim.finish()
+                    anim._has_finished = True
 
 
 class Succession(AnimationGroup):
@@ -226,8 +276,8 @@ class Succession(AnimationGroup):
             self.active_animation = self.animations[index]
             self.active_animation._setup_scene(self.scene)
             self.active_animation.begin()
-            self.active_start_time = self.anims_with_timings[index][1]
-            self.active_end_time = self.anims_with_timings[index][2]
+            self.active_start_time = self._anims_with_timings[index][1]
+            self.active_end_time = self._anims_with_timings[index][2]
 
     def next_animation(self) -> None:
         """Proceeds to the next animation.

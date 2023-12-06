@@ -33,6 +33,8 @@ from watchdog.observers import Observer
 from manim.mobject.mobject import Mobject
 from manim.mobject.opengl.opengl_mobject import OpenGLPoint
 
+import manim.animation.composition as composition
+
 from .. import config, logger
 from ..animation.animation import Animation, Wait, prepare_animation
 from ..camera.camera import Camera
@@ -477,10 +479,12 @@ class Scene:
     def add_mobjects_from_animations(self, animations):
         curr_mobjects = self.get_mobject_family_members()
         for animation in animations:
-            if animation.is_introducer():
+            if animation.is_introducer() or isinstance(animation, composition.AnimationGroup):
                 continue
             # Anything animated that's not already in the
-            # scene gets added to the scene
+            # scene gets added to the scene.
+            # AnimationGroups have to take care of adding
+            # mobjects on their own.
             mob = animation.mobject
             if mob is not None and mob not in curr_mobjects:
                 self.add(mob)

@@ -95,6 +95,10 @@ gettext_compact = False
 gettext_last_translator = ""
 gettext_language_team = ""
 
+# -- Options for LaTeX output ------------------------------------------------
+
+latex_engine = "lualatex"
+
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for

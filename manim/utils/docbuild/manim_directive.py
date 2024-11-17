@@ -122,6 +122,8 @@ def visit(self: SkipManimNode, node: nodes.Element, name: str = "") -> None:
     if not isinstance(node[0], nodes.title):
         node.insert(0, nodes.title("skip-manim", "Example Placeholder"))
 
+def visit_latex(self: SkipManimNode, node: nodes.Element):
+    raise nodes.SkipNode("skip-manim")
 
 def depart(self: SkipManimNode, node: nodes.Element) -> None:
     self.depart_admonition(node)
@@ -391,7 +393,7 @@ def _delete_rendering_times(*args: tuple[Any]) -> None:
 
 
 def setup(app: Sphinx) -> dict[str, Any]:
-    app.add_node(SkipManimNode, html=(visit, depart))
+    app.add_node(SkipManimNode, html=(visit, depart), latex=(visit_latex, None))
 
     setup.app = app
     setup.config = app.config

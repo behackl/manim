@@ -8,7 +8,7 @@ import types
 import warnings
 from pathlib import Path
 
-from .. import config, console, constants, logger
+from manim import _config, constants
 
 __all__ = ["scene_classes_from_file"]
 
@@ -16,21 +16,21 @@ __all__ = ["scene_classes_from_file"]
 def get_module(file_name: Path):
     if str(file_name) == "-":
         module = types.ModuleType("input_scenes")
-        logger.info(
+        _config.logger.info(
             "Enter the animation's code & end with an EOF (CTRL+D on Linux/Unix, CTRL+Z on Windows):",
         )
         code = sys.stdin.read()
         if not code.startswith("from manim import"):
-            logger.warning(
+            _config.logger.warning(
                 "Didn't find an import statement for Manim. Importing automatically...",
             )
             code = "from manim import *\n" + code
-        logger.info("Rendering animation from typed code...")
+        _config.logger.info("Rendering animation from typed code...")
         try:
             exec(code, module.__dict__)
             return module
         except Exception as e:
-            logger.error(f"Failed to render scene: {str(e)}")
+            _config.logger.error(f"Failed to render scene: {str(e)}")
             sys.exit(2)
     else:
         if file_name.exists():
@@ -74,12 +74,12 @@ def get_scene_classes_from_module(module):
 
 def get_scenes_to_render(scene_classes):
     if not scene_classes:
-        logger.error(constants.NO_SCENE_MESSAGE)
+        _config.logger.error(constants.NO_SCENE_MESSAGE)
         return []
-    if config["write_all"]:
+    if _config.config["write_all"]:
         return scene_classes
     result = []
-    for scene_name in config["scene_names"]:
+    for scene_name in _config.config["scene_names"]:
         found = False
         for scene_class in scene_classes:
             if scene_class.__name__ == scene_name:
@@ -87,11 +87,11 @@ def get_scenes_to_render(scene_classes):
                 found = True
                 break
         if not found and (scene_name != ""):
-            logger.error(constants.SCENE_NOT_FOUND_MESSAGE.format(scene_name))
+            _config.logger.error(constants.SCENE_NOT_FOUND_MESSAGE.format(scene_name))
     if result:
         return result
     if len(scene_classes) == 1:
-        config["scene_names"] = [scene_classes[0].__name__]
+        _config.config["scene_names"] = [scene_classes[0].__name__]
         return [scene_classes[0]]
     return prompt_user_for_choice(scene_classes)
 
@@ -103,25 +103,27 @@ def prompt_user_for_choice(scene_classes):
     SceneFileWriter.force_output_as_scene_name = True
     for count, scene_class in enumerate(scene_classes, 1):
         name = scene_class.__name__
-        console.print(f"{count}: {name}", style="logging.level.info")
+        _config.console.print(f"{count}: {name}", style="logging.level.info")
         num_to_class[count] = scene_class
     try:
-        user_input = console.input(
+        user_input = _config.console.input(
             f"[log.message] {constants.CHOOSE_NUMBER_MESSAGE} [/log.message]",
         )
         scene_classes = [
             num_to_class[int(num_str)]
             for num_str in re.split(r"\s*,\s*", user_input.strip())
         ]
-        config["scene_names"] = [scene_class.__name__ for scene_class in scene_classes]
+        _config.config["scene_names"] = [
+            scene_class.__name__ for scene_class in scene_classes
+        ]
         return scene_classes
     except KeyError:
-        logger.error(constants.INVALID_NUMBER_MESSAGE)
+        _config.logger.error(constants.INVALID_NUMBER_MESSAGE)
         sys.exit(2)
     except EOFError:
         sys.exit(1)
     except ValueError:
-        logger.error("No scenes were selected. Exiting.")
+        _config.logger.error("No scenes were selected. Exiting.")
         sys.exit(1)
 
 
@@ -133,7 +135,7 @@ def scene_classes_from_file(
     module = get_module(file_path)
     all_scene_classes = get_scene_classes_from_module(module)
     all_scene_classes += sc.REGISTERED_MANIMATIONS
-    logger.info(all_scene_classes)
+    _config.logger.info(all_scene_classes)
 
     if full_list:
         return all_scene_classes

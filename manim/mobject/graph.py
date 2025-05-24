@@ -8,8 +8,9 @@ __all__ = [
 ]
 
 import itertools as it
+from collections.abc import Hashable, Iterable, Sequence
 from copy import copy
-from typing import TYPE_CHECKING, Any, Hashable, Iterable, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 import networkx as nx
 import numpy as np
@@ -17,7 +18,8 @@ import numpy as np
 if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
-    from manim.typing import Point3D
+    from manim.scene.scene import Scene
+    from manim.typing import Point3D, Point3DLike
 
     NxGraph: TypeAlias = nx.classes.graph.Graph | nx.classes.digraph.DiGraph
 
@@ -266,9 +268,9 @@ class LayoutFunction(Protocol):
 
         Parameters
         ----------
-        graph : NxGraph
+        graph
             The underlying NetworkX graph to be laid out. DO NOT MODIFY.
-        scale : float | tuple[float, float, float], optional
+        scale
             Either a single float value, or a tuple of three float values specifying the scale along each axis.
 
         Returns
@@ -282,7 +284,7 @@ class LayoutFunction(Protocol):
 def _partite_layout(
     nx_graph: NxGraph,
     scale: float = 2,
-    partitions: list[list[Hashable]] | None = None,
+    partitions: Sequence[Sequence[Hashable]] | None = None,
     **kwargs: Any,
 ) -> dict[Hashable, Point3D]:
     if partitions is None or len(partitions) == 0:
@@ -333,13 +335,10 @@ def _tree_layout(
     # Always make a copy of the children because they get eaten
     stack = [list(children[root_vertex]).copy()]
     stick = [root_vertex]
-    parent = {u: root_vertex for u in children[root_vertex]}
+    parent = dict.fromkeys(children[root_vertex], root_vertex)
     pos = {}
     obstruction = [0.0] * len(T)
-    if orientation == "down":
-        o = -1
-    else:
-        o = 1
+    o = -1 if orientation == "down" else 1
 
     def slide(v, dx):
         """
@@ -402,15 +401,9 @@ def _tree_layout(
         if isinstance(scale, (float, int)) and (width > 0 or height > 0):
             sf = 2 * scale / max(width, height)
         elif isinstance(scale, tuple):
-            if scale[0] is not None and width > 0:
-                sw = 2 * scale[0] / width
-            else:
-                sw = 1
+            sw = 2 * scale[0] / width if scale[0] is not None and width > 0 else 1
 
-            if scale[1] is not None and height > 0:
-                sh = 2 * scale[1] / height
-            else:
-                sh = 1
+            sh = 2 * scale[1] / height if scale[1] is not None and height > 0 else 1
 
             sf = np.array([sw, sh, 0])
         else:
@@ -450,10 +443,10 @@ _layouts: dict[LayoutName, LayoutFunction] = {
 
 def _determine_graph_layout(
     nx_graph: nx.classes.graph.Graph | nx.classes.digraph.DiGraph,
-    layout: LayoutName | dict[Hashable, Point3D] | LayoutFunction = "spring",
+    layout: LayoutName | dict[Hashable, Point3DLike] | LayoutFunction = "spring",
     layout_scale: float | tuple[float, float, float] = 2,
     layout_config: dict[str, Any] | None = None,
-) -> dict[Hashable, Point3D]:
+) -> dict[Hashable, Point3DLike]:
     if layout_config is None:
         layout_config = {}
 
@@ -480,7 +473,7 @@ def _determine_graph_layout(
             raise ValueError(
                 f"The layout '{layout}' is neither a recognized layout, a layout function,"
                 "nor a vertex placement dictionary.",
-            )
+            ) from e
 
 
 class GenericGraph(VMobject, metaclass=ConvertToOpenGL):
@@ -559,6 +552,7 @@ class GenericGraph(VMobject, metaclass=ConvertToOpenGL):
         all other configuration options for a vertex.
     edge_type
         The mobject class used for displaying edges in the scene.
+        Must be a subclass of :class:`~.Line` for default updaters to work.
     edge_config
         Either a dictionary containing keyword arguments to be passed
         to the class specified via ``edge_type``, or a dictionary whose
@@ -568,18 +562,18 @@ class GenericGraph(VMobject, metaclass=ConvertToOpenGL):
 
     def __init__(
         self,
-        vertices: list[Hashable],
-        edges: list[tuple[Hashable, Hashable]],
+        vertices: Sequence[Hashable],
+        edges: Sequence[tuple[Hashable, Hashable]],
         labels: bool | dict = False,
         label_fill_color: str = BLACK,
-        layout: LayoutName | dict[Hashable, Point3D] | LayoutFunction = "spring",
+        layout: LayoutName | dict[Hashable, Point3DLike] | LayoutFunction = "spring",
         layout_scale: float | tuple[float, float, float] = 2,
         layout_config: dict | None = None,
         vertex_type: type[Mobject] = Dot,
         vertex_config: dict | None = None,
         vertex_mobjects: dict | None = None,
         edge_type: type[Mobject] = Line,
-        partitions: list[list[Hashable]] | None = None,
+        partitions: Sequence[Sequence[Hashable]] | None = None,
         root_vertex: Hashable | None = None,
         edge_config: dict | None = None,
     ) -> None:
@@ -683,15 +677,16 @@ class GenericGraph(VMobject, metaclass=ConvertToOpenGL):
     def _create_vertex(
         self,
         vertex: Hashable,
-        position: Point3D | None = None,
+        position: Point3DLike | None = None,
         label: bool = False,
         label_fill_color: str = BLACK,
         vertex_type: type[Mobject] = Dot,
         vertex_config: dict | None = None,
         vertex_mobject: dict | None = None,
     ) -> tuple[Hashable, Point3D, dict, Mobject]:
-        if position is None:
-            position = self.get_center()
+        np_position: Point3D = (
+            self.get_center() if position is None else np.asarray(position)
+        )
 
         if vertex_config is None:
             vertex_config = {}
@@ -720,14 +715,14 @@ class GenericGraph(VMobject, metaclass=ConvertToOpenGL):
         if vertex_mobject is None:
             vertex_mobject = vertex_type(**vertex_config)
 
-        vertex_mobject.move_to(position)
+        vertex_mobject.move_to(np_position)
 
-        return (vertex, position, vertex_config, vertex_mobject)
+        return (vertex, np_position, vertex_config, vertex_mobject)
 
     def _add_created_vertex(
         self,
         vertex: Hashable,
-        position: Point3D,
+        position: Point3DLike,
         vertex_config: dict,
         vertex_mobject: Mobject,
     ) -> Mobject:
@@ -753,7 +748,7 @@ class GenericGraph(VMobject, metaclass=ConvertToOpenGL):
     def _add_vertex(
         self,
         vertex: Hashable,
-        position: Point3D | None = None,
+        position: Point3DLike | None = None,
         label: bool = False,
         label_fill_color: str = BLACK,
         vertex_type: type[Mobject] = Dot,
@@ -815,15 +810,15 @@ class GenericGraph(VMobject, metaclass=ConvertToOpenGL):
             vertex_mobjects = {}
 
         graph_center = self.get_center()
-        base_positions = {v: graph_center for v in vertices}
+        base_positions = dict.fromkeys(vertices, graph_center)
         base_positions.update(positions)
         positions = base_positions
 
         if isinstance(labels, bool):
-            labels = {v: labels for v in vertices}
+            labels = dict.fromkeys(vertices, labels)
         else:
             assert isinstance(labels, dict)
-            base_labels = {v: False for v in vertices}
+            base_labels = dict.fromkeys(vertices, False)
             base_labels.update(labels)
             labels = base_labels
 
@@ -848,7 +843,7 @@ class GenericGraph(VMobject, metaclass=ConvertToOpenGL):
                 label_fill_color=label_fill_color,
                 vertex_type=vertex_type,
                 vertex_config=vertex_config[v],
-                vertex_mobject=vertex_mobjects[v] if v in vertex_mobjects else None,
+                vertex_mobject=vertex_mobjects.get(v),
             )
             for v in vertices
         ]
@@ -1212,7 +1207,7 @@ class GenericGraph(VMobject, metaclass=ConvertToOpenGL):
 
     def change_layout(
         self,
-        layout: LayoutName | dict[Hashable, Point3D] | LayoutFunction = "spring",
+        layout: LayoutName | dict[Hashable, Point3DLike] | LayoutFunction = "spring",
         layout_scale: float | tuple[float, float, float] = 2,
         layout_config: dict[str, Any] | None = None,
         partitions: list[list[Hashable]] | None = None,
@@ -1506,13 +1501,16 @@ class Graph(GenericGraph):
             VERTEX_CONF = {"radius": 0.25, "color": BLUE_B, "fill_opacity": 1}
 
             def expand_vertex(self, g, vertex_id: str, depth: int):
-                new_vertices = [f"{vertex_id}/{i}" for i in range(self.CHILDREN_PER_VERTEX)]
+                new_vertices = [
+                    f"{vertex_id}/{i}" for i in range(self.CHILDREN_PER_VERTEX)
+                ]
                 new_edges = [(vertex_id, child_id) for child_id in new_vertices]
                 g.add_edges(
                     *new_edges,
                     vertex_config=self.VERTEX_CONF,
                     positions={
-                        k: g.vertices[vertex_id].get_center() + 0.1 * DOWN for k in new_vertices
+                        k: g.vertices[vertex_id].get_center() + 0.1 * DOWN
+                        for k in new_vertices
                     },
                 )
                 if depth < self.DEPTH:
@@ -1556,7 +1554,12 @@ class Graph(GenericGraph):
     def update_edges(self, graph):
         for (u, v), edge in graph.edges.items():
             # Undirected graph has a Line edge
-            edge.put_start_and_end_on(graph[u].get_center(), graph[v].get_center())
+            edge.set_points_by_ends(
+                graph[u].get_center(),
+                graph[v].get_center(),
+                buff=self._edge_config.get("buff", 0),
+                path_arc=self._edge_config.get("path_arc", 0),
+            )
 
     def __repr__(self: Graph) -> str:
         return f"Undirected graph on {len(self.vertices)} vertices and {len(self.edges)} edges"
@@ -1765,10 +1768,15 @@ class DiGraph(GenericGraph):
         deformed.
         """
         for (u, v), edge in graph.edges.items():
-            edge_type = type(edge)
             tip = edge.pop_tips()[0]
-            new_edge = edge_type(self[u], self[v], **self._edge_config[(u, v)])
-            edge.become(new_edge)
+            # Passing the Mobject instead of the vertex makes the tip
+            # stop on the bounding box of the vertex.
+            edge.set_points_by_ends(
+                graph[u],
+                graph[v],
+                buff=self._edge_config.get("buff", 0),
+                path_arc=self._edge_config.get("path_arc", 0),
+            )
             edge.add_tip(tip)
 
     def __repr__(self: DiGraph) -> str:

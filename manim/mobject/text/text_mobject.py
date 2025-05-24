@@ -56,12 +56,11 @@ __all__ = ["Text", "Paragraph", "MarkupText", "register_font"]
 
 import copy
 import hashlib
-import os
 import re
+from collections.abc import Iterable, Sequence
 from contextlib import contextmanager
 from itertools import chain
 from pathlib import Path
-from typing import Iterable, Sequence
 
 import manimpango
 import numpy as np
@@ -135,10 +134,17 @@ class Paragraph(VGroup):
     --------
     Normal usage::
 
-        paragraph = Paragraph('this is a awesome', 'paragraph',
-                              'With \nNewlines', '\tWith Tabs',
-                              '  With Spaces', 'With Alignments',
-                              'center', 'left', 'right')
+        paragraph = Paragraph(
+            "this is a awesome",
+            "paragraph",
+            "With \nNewlines",
+            "\tWith Tabs",
+            "  With Spaces",
+            "With Alignments",
+            "center",
+            "left",
+            "right",
+        )
 
     Remove unwanted invisible characters::
 
@@ -295,7 +301,7 @@ class Paragraph(VGroup):
 
 
 class Text(SVGMobject):
-    r"""Display (non-LaTeX) text rendered using `Pango <https://pango.gnome.org/>`_.
+    r"""Display (non-LaTeX) text rendered using `Pango <https://pango.org/>`_.
 
     Text objects behave like a :class:`.VGroup`-like iterable of all characters
     in the given text. In particular, slicing is possible.
@@ -412,7 +418,7 @@ class Text(SVGMobject):
     """
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
+    @functools.cache
     def font_list() -> list[str]:
         return manimpango.list_fonts()
 
@@ -657,7 +663,8 @@ class Text(SVGMobject):
     )
     def _set_color_by_t2g(self, t2g=None):
         """Sets gradient colors for specified
-        strings. Behaves similarly to ``set_color_by_t2c``."""
+        strings. Behaves similarly to ``set_color_by_t2c``.
+        """
         t2g = t2g if t2g else self.t2g
         for word, gradient in list(t2g.items()):
             for start, end in self._find_indexes(word, self.text):
@@ -696,7 +703,7 @@ class Text(SVGMobject):
             default = default_args[arg]
             if left != default and getattr(right_setting, arg) != default:
                 raise ValueError(
-                    f"Ambiguous style for text '{self.text[right_setting.start:right_setting.end]}':"
+                    f"Ambiguous style for text '{self.text[right_setting.start : right_setting.end]}':"
                     + f"'{arg}' cannot be both '{left}' and '{right}'."
                 )
             setattr(right_setting, arg, left if left != default else right)
@@ -857,7 +864,7 @@ class Text(SVGMobject):
 
 
 class MarkupText(SVGMobject):
-    r"""Display (non-LaTeX) text rendered using `Pango <https://pango.gnome.org/>`_.
+    r"""Display (non-LaTeX) text rendered using `Pango <https://pango.org/>`_.
 
     Text objects behave like a :class:`.VGroup`-like iterable of all characters
     in the given text. In particular, slicing is possible.
@@ -907,7 +914,7 @@ class MarkupText(SVGMobject):
     Here is a list of supported tags:
 
     - ``<b>bold</b>``, ``<i>italic</i>`` and ``<b><i>bold+italic</i></b>``
-    - ``<ul>underline</ul>`` and ``<s>strike through</s>``
+    - ``<u>underline</u>`` and ``<s>strike through</s>``
     - ``<tt>typewriter font</tt>``
     - ``<big>bigger font</big>`` and ``<small>smaller font</small>``
     - ``<sup>superscript</sup>`` and ``<sub>subscript</sub>``
@@ -1155,7 +1162,7 @@ class MarkupText(SVGMobject):
     """
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
+    @functools.cache
     def font_list() -> list[str]:
         return manimpango.list_fonts()
 
@@ -1305,15 +1312,13 @@ class MarkupText(SVGMobject):
             self.set_color_by_gradient(*self.gradient)
         for col in colormap:
             self.chars[
-                col["start"]
-                - col["start_offset"] : col["end"]
+                col["start"] - col["start_offset"] : col["end"]
                 - col["start_offset"]
                 - col["end_offset"]
             ].set_color(self._parse_color(col["color"]))
         for grad in gradientmap:
             self.chars[
-                grad["start"]
-                - grad["start_offset"] : grad["end"]
+                grad["start"] - grad["start_offset"] : grad["end"]
                 - grad["start_offset"]
                 - grad["end_offset"]
             ].set_color_by_gradient(
@@ -1406,7 +1411,8 @@ class MarkupText(SVGMobject):
         """Counts characters that will be displayed.
 
         This is needed for partial coloring or gradients, because space
-        counts to the text's `len`, but has no corresponding character."""
+        counts to the text's `len`, but has no corresponding character.
+        """
         count = 0
         level = 0
         # temporarily replace HTML entities by single char
@@ -1449,7 +1455,9 @@ class MarkupText(SVGMobject):
                     "end_offset": end_offset,
                 },
             )
-        self.text = re.sub("<gradient[^>]+>(.+?)</gradient>", r"\1", self.text, 0, re.S)
+        self.text = re.sub(
+            "<gradient[^>]+>(.+?)</gradient>", r"\1", self.text, count=0, flags=re.S
+        )
         return gradientmap
 
     def _parse_color(self, col):
@@ -1491,7 +1499,9 @@ class MarkupText(SVGMobject):
                     "end_offset": end_offset,
                 },
             )
-        self.text = re.sub("<color[^>]+>(.+?)</color>", r"\1", self.text, 0, re.S)
+        self.text = re.sub(
+            "<color[^>]+>(.+?)</color>", r"\1", self.text, count=0, flags=re.S
+        )
         return colormap
 
     def __repr__(self):
@@ -1537,7 +1547,6 @@ def register_font(font_file: str | Path):
         This method is available for macOS for ``ManimPango>=v0.2.3``. Using this
         method with previous releases will raise an :class:`AttributeError` on macOS.
     """
-
     input_folder = Path(config.input_file).parent.resolve()
     possible_paths = [
         Path(font_file),
@@ -1552,7 +1561,7 @@ def register_font(font_file: str | Path):
             logger.debug("Found file at %s", file_path.absolute())
             break
     else:
-        error = f"Can't find {font_file}." f"Tried these : {possible_paths}"
+        error = f"Can't find {font_file}.Tried these : {possible_paths}"
         raise FileNotFoundError(error)
 
     try:

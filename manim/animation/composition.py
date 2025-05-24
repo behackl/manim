@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import types
-from typing import TYPE_CHECKING, Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
@@ -81,15 +82,10 @@ class AnimationGroup(Animation):
         return list(self.group)
 
     def begin(self) -> None:
-        if self.run_time <= 0:
-            tmp = (
-                "Please set the run_time to be positive"
-                if len(self.animations) != 0
-                else "Please add at least one Animation with positive run_time"
-            )
+        if not self.animations:
             raise ValueError(
-                f"{self} has a run_time of 0 seconds, this cannot be "
-                f"rendered correctly. {tmp}."
+                f"Trying to play {self} without animations, this is not supported. "
+                "Please add at least one subanimation."
             )
         self.anim_group_time = 0.0
         if self.suspend_mobject_updating:
@@ -102,7 +98,8 @@ class AnimationGroup(Animation):
             anim._setup_scene(scene)
 
     def finish(self) -> None:
-        self.interpolate(1)
+        for anim in self.animations:
+            anim.finish()
         self.anims_begun[:] = True
         self.anims_finished[:] = True
         if self.suspend_mobject_updating:
@@ -178,11 +175,13 @@ class AnimationGroup(Animation):
         ]
 
         run_times = to_update["end"] - to_update["start"]
+        with_zero_run_time = run_times == 0
+        run_times[with_zero_run_time] = 1
         sub_alphas = (anim_group_time - to_update["start"]) / run_times
         if time_goes_back:
-            sub_alphas[sub_alphas < 0] = 0
+            sub_alphas[(sub_alphas < 0) | with_zero_run_time] = 0
         else:
-            sub_alphas[sub_alphas > 1] = 1
+            sub_alphas[(sub_alphas > 1) | with_zero_run_time] = 1
 
         for anim_to_update, sub_alpha in zip(to_update["anim"], sub_alphas):
             anim_to_update.interpolate(sub_alpha)
@@ -233,7 +232,11 @@ class Succession(AnimationGroup):
         super().__init__(*animations, lag_ratio=lag_ratio, **kwargs)
 
     def begin(self) -> None:
-        assert len(self.animations) > 0
+        if not self.animations:
+            raise ValueError(
+                f"Trying to play {self} without animations, this is not supported. "
+                "Please add at least one subanimation."
+            )
         self.update_active_animation(0)
 
     def finish(self) -> None:

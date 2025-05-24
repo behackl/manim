@@ -297,7 +297,7 @@ class VectorScene(Scene):
         """
         if not isinstance(label, MathTex):
             if len(label) == 1:
-                label = "\\vec{\\textbf{%s}}" % label
+                label = "\\vec{\\textbf{%s}}" % label  # noqa: UP031
             label = MathTex(label)
             if color is None:
                 color = vector.get_color()
@@ -904,9 +904,8 @@ class LinearTransformationScene(VectorScene):
         if new_label:
             label_mob.target_text = new_label
         else:
-            label_mob.target_text = "{}({})".format(
-                transformation_name,
-                label_mob.get_tex_string(),
+            label_mob.target_text = (
+                f"{transformation_name}({label_mob.get_tex_string()})"
             )
         label_mob.vector = vector
         label_mob.kwargs = kwargs
@@ -1003,7 +1002,6 @@ class LinearTransformationScene(VectorScene):
         Animation
             The animation of the movement.
         """
-
         v_pieces = [piece for piece in pieces if isinstance(piece, VMobject)]
         start = VGroup(*v_pieces)
         target = VGroup(*(mob.target for mob in v_pieces))
@@ -1094,7 +1092,6 @@ class LinearTransformationScene(VectorScene):
         **kwargs
             Any valid keyword argument of self.apply_transposed_matrix()
         """
-
         self.apply_transposed_matrix(np.array(matrix).T, **kwargs)
 
     def apply_inverse(self, matrix: np.ndarray | list | tuple, **kwargs):

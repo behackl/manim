@@ -77,6 +77,9 @@ jupyterlab = [
     "jupyterlab>=4.3.4",
     "notebook>=7.3.2",
 ]
+typst = [
+    "typst>=0.13.2",
+]
 
 [dependency-groups]
 dev = [

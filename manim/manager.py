@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 import srt
 
-from . import logger
+from . import config, logger
+from .presentation.protocol import PresentationContext
 from .scene.section import DefaultSectionType
 from .utils.exceptions import EndSceneEarlyException, RerunSceneException
 from .utils.file_ops import open_media_file
@@ -146,6 +147,23 @@ class Manager(Generic[SceneT]):
             ``False``. This matches the return value of
             :meth:`~manim.scene.scene.Scene.render`.
         """
+        presenter = self.scene.presenter
+        if presenter is not None:
+            presenter.start(
+                PresentationContext(
+                    scene_name=type(self.scene).__name__,
+                    session_spec=self.session_spec,
+                    frame_rate=float(config.frame_rate),
+                ),
+            )
+        try:
+            return self._render(preview)
+        finally:
+            if presenter is not None:
+                presenter.finish()
+
+    def _render(self, preview: bool = False) -> bool:
+        """Run the render lifecycle inside the presenter resource scope."""
         presentation = self.session_spec.presentation
         open_after_render = preview or presentation.open_after_render
         if open_after_render and not self.output_spec.enabled:

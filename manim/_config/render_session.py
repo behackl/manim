@@ -58,9 +58,11 @@ def resolve_render_session(
     capabilities: RendererCapabilities,
     *,
     renderer_name: str,
+    presenter_requested: bool = False,
 ) -> RenderSessionSpec:
     """Resolve and validate one renderer-independent session request."""
-    live_preview = config.live_preview or config.enable_gui
+    configured_live_preview = config.live_preview or config.enable_gui
+    live_preview = configured_live_preview or presenter_requested
     dry_run = config.dry_run
     requested_format = OutputFormat.parse(config.format)
     fallback_to_still = False
@@ -90,7 +92,9 @@ def resolve_render_session(
         show_in_file_browser=config.show_in_file_browser,
     )
 
-    if live_preview and not capabilities.live_preview:
+    if configured_live_preview and not (
+        capabilities.live_preview or presenter_requested
+    ):
         raise ValueError(
             f"{renderer_name} does not support live preview. "
             "Select a renderer with live-preview support or remove --live-preview.",

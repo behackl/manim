@@ -11,6 +11,7 @@ from ... import config, logger
 from ..._config.video_encoder import video_encoder_fingerprint
 from ...mobject.mobject import Mobject, _AnimationBuilder
 from ...mobject.types.image_mobject import ImageMobjectFromCamera
+from ...presentation.protocol import FrameInfo, PresentationFrame
 from ...scene.scene_file_writer import SceneFileWriter
 from ...utils.exceptions import EndSceneEarlyException
 from ...utils.iterables import list_update
@@ -133,7 +134,7 @@ class CairoRenderer:
 
         if scene.is_current_animation_frozen_frame():
             self.update_frame(scene, mobjects=scene.moving_mobjects)
-            self.freeze_current_frame(scene.duration)
+            self.freeze_current_frame(scene, scene.duration)
         else:
             scene.play_internal()
         self.file_writer.end_animation(not self.skip_animations)
@@ -290,7 +291,31 @@ class CairoRenderer:
         if self._render_all_mobjects:
             moving_mobjects = None
         self.update_frame(scene, moving_mobjects)
-        self.add_frame(self.get_frame())
+        frame = self._presentation_frame(scene, animation_time=time)
+        if scene.presenter is not None:
+            scene.presenter.present(frame)
+        self.add_frame(frame.pixels)
+
+    def _presentation_frame(
+        self,
+        scene: Scene,
+        *,
+        animation_time: float,
+        frozen: bool = False,
+    ) -> PresentationFrame:
+        """Describe the current target for synchronous presentation."""
+        return PresentationFrame(
+            self.get_frame,
+            FrameInfo.for_animation(
+                play_index=self.num_plays,
+                animation_time=animation_time,
+                animation_duration=scene.duration,
+                scene_time=self.time,
+                frame_rate=self._frame_rate,
+                frozen=frozen,
+                skipped=self.skip_animations,
+            ),
+        )
 
     def get_frame(self) -> RGBAPixelArray:
         """Return a fresh owned top-left-origin RGBA frame."""
@@ -306,9 +331,16 @@ class CairoRenderer:
         self.time += num_frames / self._frame_rate
         self.file_writer.write_frame(frame, repeat=num_frames)
 
-    def freeze_current_frame(self, duration: float) -> None:
+    def freeze_current_frame(self, scene: Scene, duration: float) -> None:
+        frame = self._presentation_frame(
+            scene,
+            animation_time=duration,
+            frozen=True,
+        )
+        if scene.presenter is not None:
+            scene.presenter.present(frame)
         self.add_frame(
-            self.get_frame(),
+            frame.pixels,
             num_frames=int(duration * self._frame_rate),
         )
 
@@ -358,6 +390,14 @@ class CairoRenderer:
         elif not self.num_plays:
             self.static_image = None
             self.update_frame(scene)
+            if scene.presenter is not None:
+                scene.presenter.present(
+                    self._presentation_frame(
+                        scene,
+                        animation_time=0,
+                        frozen=True,
+                    ),
+                )
 
         if output.is_still or (not self.num_plays and output.fallback_to_still):
             if self.num_plays:

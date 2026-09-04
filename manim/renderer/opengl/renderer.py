@@ -22,6 +22,7 @@ from manim.utils.color import color_to_rgba
 from manim.utils.exceptions import EndSceneEarlyException
 
 from ...constants import *
+from ...presentation.protocol import FrameInfo, PresentationFrame
 from ...scene.scene_file_writer import SceneFileWriter
 from ..protocol import RendererCapabilities
 from .shader import Mesh, Shader
@@ -145,10 +146,11 @@ class OpenGLRenderer:
         self.scene = scene
 
         self.background_color = config["background_color"]
-        if self.should_create_window(session_spec):
+        if self.should_create_window(scene, session_spec):
             from .window import Window
 
             self.window = Window(self)
+            scene.presenter = self.window
             self.context = self.window.ctx
             self.frame_buffer_object = self.context.detect_framebuffer()
         else:
@@ -171,13 +173,17 @@ class OpenGLRenderer:
             moderngl.ONE,
         )
 
-    def should_create_window(self, session_spec: RenderSessionSpec) -> bool:
+    def should_create_window(
+        self,
+        scene: Scene,
+        session_spec: RenderSessionSpec,
+    ) -> bool:
         """
         Determine whether a window should be created for rendering
         based on the current configuration.
 
         """
-        return session_spec.presentation.live_preview
+        return scene.presenter is None and session_spec.presentation.live_preview
 
     def get_pixel_shape(self) -> tuple[int, int] | None:
         """
@@ -442,16 +448,24 @@ class OpenGLRenderer:
             self.update_frame(scene)
 
             output = self.file_writer.output_spec
+            frame = self._presentation_frame(
+                scene,
+                animation_time=scene.duration,
+                frozen=True,
+            )
+            if output.is_video or output.is_image_sequence:
+                _ = frame.pixels
+            if scene.presenter is not None:
+                scene.presenter.present(frame)
             if not self.skip_animations and (
                 output.is_video or output.is_image_sequence
             ):
                 self.file_writer.write_frame(
-                    self.get_frame(),
+                    frame.pixels,
                     repeat=int(config.frame_rate * scene.duration),
                 )
 
             if self.window is not None:
-                self.window.swap_buffers()
                 while time.time() - self.animation_start_time < scene.duration:
                     pass
             self.animation_elapsed_time = scene.duration
@@ -472,9 +486,14 @@ class OpenGLRenderer:
         in the renderer.
         """
         self.frame_buffer_object.clear(*self.background_color)
-        if self.window is None:
-            return
-        self.window.swap_buffers()
+        if self.scene.presenter is not None:
+            self.scene.presenter.present(
+                self._presentation_frame(
+                    self.scene,
+                    animation_time=0,
+                    frozen=True,
+                ),
+            )
 
     def render(
         self, scene: Scene, frame_offset: float, moving_mobjects: list[Mobject]
@@ -508,14 +527,48 @@ class OpenGLRenderer:
             return
 
         output = self.file_writer.output_spec
+        frame = self._presentation_frame(scene, animation_time=frame_offset)
         if output.is_video or output.is_image_sequence:
-            self.file_writer.write_frame(self.get_frame())
+            # Read before a native presenter swaps the OpenGL back buffer.
+            _ = frame.pixels
+
+        if scene.presenter is not None:
+            scene.presenter.present(frame)
+
+        if output.is_video or output.is_image_sequence:
+            self.file_writer.write_frame(frame.pixels)
 
         if self.window is not None:
-            self.window.swap_buffers()
             while self.animation_elapsed_time < frame_offset:
                 self.update_frame(scene)
-                self.window.swap_buffers()
+                if scene.presenter is not None:
+                    scene.presenter.present(
+                        self._presentation_frame(
+                            scene,
+                            animation_time=self.animation_elapsed_time,
+                        ),
+                    )
+
+    def _presentation_frame(
+        self,
+        scene: Scene,
+        *,
+        animation_time: float,
+        frozen: bool = False,
+    ) -> PresentationFrame:
+        """Describe the current framebuffer for synchronous presentation."""
+        return PresentationFrame(
+            self.get_frame,
+            FrameInfo.for_animation(
+                play_index=self.num_plays,
+                animation_time=animation_time,
+                animation_duration=scene.duration,
+                scene_time=self.time + max(0.0, animation_time),
+                frame_rate=float(config.frame_rate),
+                frozen=frozen,
+                skipped=self.skip_animations,
+            ),
+        )
 
     def update_frame(self, scene: Scene) -> None:
         """
@@ -571,6 +624,14 @@ class OpenGLRenderer:
             # Keep the framebuffer useful for direct renderer access and
             # graphical tests even when no media artifact was requested.
             self.update_frame(scene)
+            if scene.presenter is not None:
+                scene.presenter.present(
+                    self._presentation_frame(
+                        scene,
+                        animation_time=0,
+                        frozen=True,
+                    ),
+                )
 
         if self.should_save_last_frame():
             if self.num_plays > 0:

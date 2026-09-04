@@ -72,6 +72,7 @@ if TYPE_CHECKING:
     from types import FrameType
     from typing import Self, TypeAlias
 
+    from manim.presentation.protocol import FramePresenter
     from manim.typing import Point3D
 
     SceneInteractAction: TypeAlias = (
@@ -183,6 +184,7 @@ class Scene:
         always_update_mobjects: bool = False,
         random_seed: int | None = None,
         skip_animations: bool = False,
+        presenter: FramePresenter | None = None,
     ) -> None:
         self.camera_class = camera_class
         self.always_update_mobjects = always_update_mobjects
@@ -207,6 +209,7 @@ class Scene:
         self.mouse_press_callbacks: list[Callable[[], None]] = []
         self.interactive_mode = False
         self.manager: Manager[Self] | None = None
+        self.presenter = presenter
 
         if config.renderer == RendererType.OPENGL:
             # Items associated with interaction
@@ -228,6 +231,7 @@ class Scene:
             config,
             self.renderer.capabilities,
             renderer_name=type(self.renderer).__name__,
+            presenter_requested=self.presenter is not None,
         )
         scene_name = type(self).__name__
         module_name = resolve_module_name(config)
@@ -293,12 +297,13 @@ class Scene:
         result = cls.__new__(cls)
         clone_from_id[id(self)] = result
         for k, v in self.__dict__.items():
-            if k in ["manager", "renderer", "time_progression"]:
+            if k in ["manager", "presenter", "renderer", "time_progression"]:
                 continue
             if k == "camera_class":
                 setattr(result, k, v)
             setattr(result, k, copy.deepcopy(v, clone_from_id))
         result.manager = None
+        result.presenter = self.presenter
 
         return result
 
@@ -1147,7 +1152,10 @@ class Scene:
             total=n_iterations,
             leave=config["progress_bar"] == "leave",
             ascii=True if platform.system() == "Windows" else None,
-            disable=config["progress_bar"] == "none",
+            disable=(
+                config["progress_bar"] == "none"
+                or (self.presenter is not None and self.presenter.handles_progress)
+            ),
         )
         return time_progression
 

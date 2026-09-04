@@ -10,12 +10,18 @@ from screeninfo import Monitor, get_monitors
 from ... import __version__, config
 
 if TYPE_CHECKING:
+    from manim.presentation.protocol import (
+        PresentationContext,
+        PresentationFrame,
+    )
+
     from .renderer import OpenGLRenderer
 
 __all__ = ["Window"]
 
 
 class Window(PygletWindow):
+    handles_progress = False
     fullscreen = False
     resizable = True
     gl_version = (3, 3)
@@ -74,6 +80,16 @@ class Window(PygletWindow):
 
         initial_position = self.find_initial_position(size, monitor)
         self.position = initial_position
+
+    def start(self, context: PresentationContext) -> None:
+        """Start a presentation session; the window is already initialized."""
+
+    def present(self, frame: PresentationFrame) -> None:
+        """Present the renderer's native back buffer without reading pixels."""
+        self.swap_buffers()
+
+    def finish(self) -> None:
+        """Finish a scene while retaining the window for interactive reuse."""
 
     # Delegate event handling to scene.
     def on_mouse_motion(self, x: int, y: int, dx: int, dy: int) -> None:

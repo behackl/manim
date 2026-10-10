@@ -2,71 +2,159 @@ name: Publish Docker Image
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - .dockerignore
+      - docker/**
+      - .github/workflows/publish-docker.yml
+      - pyproject.toml
+      - uv.lock
   release:
     types: [released]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  IMAGE: manimcommunity/manim
 
 jobs:
-  docker-latest:
-    runs-on: ubuntu-latest
-    if: github.event_name != 'release'
+  build:
+    name: Build and test (${{ matrix.arch }})
+    if: github.event_name != 'release' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    # Cancel superseded PR checks, but keep main builds available for releases.
+    concurrency:
+      group: docker-build-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}-${{ matrix.arch }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+      - uses: actions/checkout@v7
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - name: Test publication logic
+        run: python3 -m unittest discover -s docker -p test_release.py
 
-      - name: Login to DockerHub
+      - name: Read Manim version
+        id: version
+        run: python3 docker/release.py version >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub (upstream main only)
+        if: github.repository == 'ManimCommunity/manim' && github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build the native image
         uses: docker/build-push-action@v7
         with:
-          platforms: linux/arm64,linux/amd64
-          push: true
+          context: .
           file: docker/Dockerfile
-          tags: |
-            manimcommunity/manim:latest
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          push: false
+          provenance: false
+          tags: manim-test:${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=manim-${{ matrix.arch }}
+          cache-to: type=gha,scope=manim-${{ matrix.arch }},mode=max
 
-  docker-release:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'release'
-    steps:
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Login to DockerHub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Get Version
-        id: create_release
-        shell: python
+      - name: Test the installed image as its default user
         env:
-          tag_act: ${{ github.ref }}
+          ARCH: ${{ matrix.arch }}
+          MANIM_EXPECTED_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          import os
-          ref_tag = os.getenv('tag_act').split('/')[-1]
-          with open(os.getenv('GITHUB_OUTPUT'), 'w') as f:
-            print(f"tag_name={ref_tag}", file=f)
+          docker run --rm --network none \
+            --env MANIM_EXPECTED_VERSION \
+            --mount "type=bind,source=$PWD/docker/test_runtime.py,target=/tmp/test_runtime.py,readonly" \
+            "manim-test:$ARCH" python /tmp/test_runtime.py
 
-      - name: Build and push
-        uses: docker/build-push-action@v7
+      - name: Push the tested image
+        if: github.repository == 'ManimCommunity/manim' && github.event_name != 'pull_request'
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          tag="$IMAGE:build-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ARCH"
+          docker tag "manim-test:$ARCH" "$tag"
+          docker push "$tag"
+          mkdir -p "$RUNNER_TEMP/digests"
+          docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' \
+            | python3 -c 'import json, os, sys; print(os.environ["IMAGE"] + "@" + json.load(sys.stdin)["digest"])' \
+            > "$RUNNER_TEMP/digests/$ARCH.txt"
+
+      - name: Pass the tested digest to publication
+        if: github.repository == 'ManimCommunity/manim' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
         with:
-          platforms: linux/arm64,linux/amd64
-          push: true
-          file: docker/Dockerfile
-          tags: |
-            manimcommunity/manim:stable
-            manimcommunity/manim:latest
-            manimcommunity/manim:${{ steps.create_release.outputs.tag_name }}
+          name: docker-digest-${{ matrix.arch }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/digests/${{ matrix.arch }}.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish main
+    needs: build
+    if: github.repository == 'ManimCommunity/manim' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: docker-publish-main
+      queue: max
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: docker-digest-*-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+      - name: Record the commit image and update latest if main has not advanced
+        run: python3 docker/release.py main --digests "$RUNNER_TEMP/digests"
+
+  release:
+    name: Publish release without rebuilding
+    if: github.repository == 'ManimCommunity/manim' && github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    concurrency:
+      group: docker-publish-release
+      queue: max
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      RELEASE_ID: ${{ github.event.release.id }}
+    steps:
+      - name: Checkout the immutable release event commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Promote the tested commit digest to the release tags
+        run: python3 docker/release.py release --tag "$RELEASE_TAG"

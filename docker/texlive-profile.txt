@@ -1,3 +1,4 @@
+# Package documentation and sources stay disabled for installs and updates.
 selected_scheme scheme-minimal
 TEXDIR /usr/local/texlive
 TEXMFCONFIG ~/.texlive/texmf-config
@@ -6,5 +7,9 @@ TEXMFLOCAL /usr/local/texlive/texmf-local
 TEXMFSYSCONFIG /usr/local/texlive/texmf-config
 TEXMFSYSVAR /usr/local/texlive/texmf-var
 TEXMFVAR ~/.texlive/texmf-var
-option_doc 0
-option_src 0
+tlpdbopt_install_docfiles 0
+tlpdbopt_install_srcfiles 0
+tlpdbopt_autobackup 0
+# Do not switch the frozen repository back to a live CTAN mirror after install.
+instopt_adjustrepo 0
+instopt_adjustpath 0

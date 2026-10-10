@@ -22,8 +22,11 @@ For our image ``manimcommunity/manim``, there are the following tags:
 
    The Docker image ships with a minimal TeX Live installation. In particular,
    ``ctex`` is not installed by default. If your scenes rely on
-   ``TexTemplateLibrary.ctex``, install it in the container via
-   ``tlmgr install ctex``.
+   ``TexTemplateLibrary.ctex``, add it in a derived image (see below), or run
+   ``docker exec --user root CONTAINER tlmgr install ctex`` in a persistent
+   container. The system TeX installation is root-owned; the default
+   ``manimuser`` cannot modify it. Package installation uses the image's pinned
+   TeX repository rather than the current rolling CTAN repository.
 
 
 Basic usage of the Docker container
@@ -55,10 +58,13 @@ modify to your liking. First, run
    docker run -it --name my-manim-container -v "/full/path/to/your/directory:/manim" manimcommunity/manim bash
 
 
-to obtain an interactive shell inside your container allowing you
-to, e.g., install further dependencies (like texlive packages using
-``tlmgr``). Exit the container as soon as you are satisfied. Then,
-before using it, start the container by running
+to obtain an interactive shell inside your container. Rendering uses the
+non-root ``manimuser``. To install system dependencies or TeX packages, use a
+root shell in another terminal, for example
+``docker exec --user root -it my-manim-container bash``.
+
+Exit the container as soon as you are satisfied. Then, before using it,
+start the container by running
 
 .. code-block:: sh
 
@@ -70,6 +76,31 @@ a scene ``CircleToSquare`` in a file ``test_scenes.py``, run
 .. code-block:: sh
 
    docker exec -it my-manim-container manim -qm test_scenes.py CircleToSquare
+
+
+Customizing the image
+---------------------
+
+For changes that should survive recreating a container, build a derived image.
+For example, a Dockerfile adding Chinese TeX support can contain:
+
+.. code-block:: dockerfile
+
+   FROM manimcommunity/manim:stable
+   USER root
+   RUN tlmgr install ctex
+   USER manimuser
+
+Build it with ``docker build -t my-manim .`` and use ``my-manim`` in place of
+``manimcommunity/manim``. For reproducible projects, replace ``stable`` with a
+specific version or image digest. Changes made inside a throwaway container
+started with ``--rm`` are discarded when it exits.
+
+The default image continues to include TeX and Jupyter. Main and release images
+are tested on both AMD64 and ARM64. Releases promote the exact tested
+image digest rather than rebuilding it. For build, test, and dependency-update
+instructions, see the repository's
+`Docker maintenance guide <https://github.com/ManimCommunity/manim/blob/main/docker/readme.md>`__.
 
 
 Running JupyterLab via Docker

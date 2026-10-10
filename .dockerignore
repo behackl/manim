@@ -1,4 +1,12 @@
 .git
+.github/
+.pi/
+.venv/
+venv/
+.env
+.env.*
+.pytest_cache/
+.ruff_cache/
 
 # Development / test artifacts
 __pycache__

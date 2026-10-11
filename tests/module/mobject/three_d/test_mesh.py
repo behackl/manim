@@ -6,9 +6,6 @@ from manim import (
     RED,
     WHITE,
     ParametricSurface,
-    Scene,
-    Square,
-    tempconfig,
 )
 
 
@@ -82,11 +79,3 @@ def test_wireframe_follows_the_parameter_lines():
     assert len(wireframe) == (4 + 1) + (3 + 1)
     np.testing.assert_allclose(wireframe[0].get_start(), [-1, 0, 0])
     np.testing.assert_allclose(wireframe[0].get_end(), [-1, 3, -3])
-
-
-def test_cairo_cannot_draw_meshes_yet():
-    with tempconfig({"dry_run": True}):
-        scene = Scene()
-        scene.add(Square(), _saddle())
-        with pytest.raises(NotImplementedError, match="opengl"):
-            scene.renderer.update_frame(scene)

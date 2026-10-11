@@ -103,6 +103,12 @@ class RMesh(NamedTuple):
     gloss: float
     shadow: float
     depth_test: bool
+    #: Polygons as vertex indices (see :attr:`.MeshMobject.faces`).
+    faces: np.ndarray
+    shade_in_3d: bool
+    #: Colour and width of the outlines of the faces.
+    stroke_rgbas: FloatRGBA_Array
+    stroke_width: float
 
 
 Payload = RPath | RPoints | RImage | RCameraView | RMesh
@@ -119,7 +125,7 @@ _ARRAYS: dict[type, tuple[str, ...]] = {
     RPoints: ("points", "rgbas"),
     RImage: ("pixel_array", "points"),
     RCameraView: ("points",),
-    RMesh: ("points", "triangles", "rgbas", "uvs", "texture"),
+    RMesh: ("points", "triangles", "faces", "rgbas", "uvs", "texture", "stroke_rgbas"),
 }
 
 
@@ -220,6 +226,10 @@ def _payload(mobject: Mobject) -> Payload | None:
             mobject.gloss,
             mobject.shadow,
             mobject.depth_test,
+            mobject.get_faces(),
+            mobject.shade_in_3d,
+            mobject.stroke_rgbas,
+            mobject.stroke_width,
         )
     if isinstance(mobject, Mobject):
         return None

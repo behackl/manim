@@ -980,22 +980,23 @@ class _CameraView(typing.NamedTuple):
 
     @classmethod
     def of(cls, camera: Camera) -> _CameraView:
+        rotation = camera._view_rotation()
         if isinstance(camera, ThreeDCamera):
             camera._prepare_for_render()
             zoom = camera.get_zoom()
             return cls(
                 center=np.asarray(camera.frame_center, dtype=float),
-                rotation=np.asarray(camera.get_rotation_matrix(), dtype=float),
+                rotation=rotation,
                 frame_shape=(camera.frame_width / zoom, camera.frame_height / zoom),
                 focal_distance=float(camera.get_focal_distance()),
-                light_source=np.asarray(camera.light_source.get_center(), dtype=float),
+                light_source=camera._light_position(),
             )
         return cls(
             center=np.asarray(camera.frame_center, dtype=float),
-            rotation=np.identity(3),
+            rotation=rotation,
             frame_shape=(camera.frame_width, camera.frame_height),
             focal_distance=_ORTHOGRAPHIC_FOCAL_DISTANCE,
-            light_source=np.array([-10.0, 10.0, 10.0]),
+            light_source=camera._light_position(),
         )
 
     def view_matrix(self) -> np.ndarray:

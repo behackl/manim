@@ -18,6 +18,7 @@ import numpy as np
 
 from manim.mobject.fields import check_in_place_modifications
 from manim.mobject.mobject import Mobject
+from manim.mobject.three_d.mesh import MeshMobject
 from manim.mobject.types.image_mobject import (
     AbstractImageMobject,
     ImageMobjectFromCamera,
@@ -33,7 +34,7 @@ if TYPE_CHECKING:
     from manim.constants import CapStyleType, LineJointType
     from manim.typing import FloatRGBA_Array, PixelArray, Point3D, Point3D_Array
 
-__all__ = ["RCameraView", "RImage", "RNode", "RPath", "RPoints", "extract"]
+__all__ = ["RCameraView", "RImage", "RMesh", "RNode", "RPath", "RPoints", "extract"]
 
 #: Transform of every node while mobjects store their points in scene coordinates.
 IDENTITY = np.eye(4)
@@ -87,7 +88,24 @@ class RCameraView(NamedTuple):
     resampling_algorithm: Resampling
 
 
-Payload = RPath | RPoints | RImage | RCameraView
+class RMesh(NamedTuple):
+    """A triangle mesh (:class:`~.MeshMobject`)."""
+
+    points: Point3D_Array
+    #: Vertex indices, three per triangle.
+    triangles: np.ndarray
+    #: One colour for the whole mesh, or one per vertex.
+    rgbas: FloatRGBA_Array
+    #: Texture coordinates per vertex; empty without a texture.
+    uvs: np.ndarray
+    #: RGBA pixels; empty without a texture.
+    texture: PixelArray
+    gloss: float
+    shadow: float
+    depth_test: bool
+
+
+Payload = RPath | RPoints | RImage | RCameraView | RMesh
 
 # The array fields each payload is drawn from, checked for in-place modifications.
 _ARRAYS: dict[type, tuple[str, ...]] = {
@@ -101,6 +119,7 @@ _ARRAYS: dict[type, tuple[str, ...]] = {
     RPoints: ("points", "rgbas"),
     RImage: ("pixel_array", "points"),
     RCameraView: ("points",),
+    RMesh: ("points", "triangles", "rgbas", "uvs", "texture"),
 }
 
 
@@ -191,6 +210,17 @@ def _payload(mobject: Mobject) -> Payload | None:
         )
     if isinstance(mobject, ImageMobjectFromCamera):
         return RCameraView(mobject.points, mobject.resampling_algorithm)
+    if isinstance(mobject, MeshMobject):
+        return RMesh(
+            mobject.points,
+            mobject.triangles,
+            mobject.rgbas,
+            mobject.uvs,
+            mobject.texture,
+            mobject.gloss,
+            mobject.shadow,
+            mobject.depth_test,
+        )
     if isinstance(mobject, Mobject):
         return None
     raise TypeError(

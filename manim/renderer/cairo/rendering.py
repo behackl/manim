@@ -21,6 +21,7 @@ from manim.mobject.types.vectorized_mobject import (
 from manim.renderer.snapshot import (
     RCameraView,
     RImage,
+    RMesh,
     RNode,
     RPath,
     RPoints,
@@ -103,6 +104,11 @@ class _CairoDrawingContext:
                 self._display_paths(list(group))
             elif payload_type is RPoints:
                 self._display_point_clouds(group)
+            elif payload_type is RMesh:
+                raise NotImplementedError(
+                    "The Cairo renderer cannot draw MeshMobject or ParametricSurface "
+                    "yet; render with --renderer=opengl, or use Surface."
+                )
             else:
                 self._display_images(group)
 

@@ -39,6 +39,9 @@ frame with the usual mobject operations::
     self.play(self.camera.auto_zoom([square]))
     self.play(Restore(self.camera.frame))
 
+To keep a mobject in place on screen while the camera moves, for example a title,
+call its :meth:`~.Mobject.fix_in_frame` method.
+
 The same camera classes are used by the Cairo and the OpenGL renderer. For
 three-dimensional views, :class:`.ThreeDScene` uses a :class:`.ThreeDCamera`; see
 its orientation methods.

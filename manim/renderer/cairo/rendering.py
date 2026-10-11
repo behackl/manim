@@ -85,8 +85,7 @@ class _CairoDrawingContext:
         # Paths can be cached only if the camera draws points where they are.
         self._path_cache = (
             self.target.path_cache
-            if type(self.camera).transform_points_pre_display
-            is Camera.transform_points_pre_display
+            if type(self.camera)._place is Camera._place
             else None
         )
         if self._path_cache is not None:
@@ -145,7 +144,7 @@ class _CairoDrawingContext:
         self, context: cairo.Context, node: RNode, path: RPath
     ) -> bool:
         """Set the context's path to the node's path; return whether it did."""
-        points = self.camera.transform_points_pre_display(node.source, path.points)
+        points = self.camera._display_points(node, path.points)
         if len(points) == 0:
             return False
 
@@ -202,8 +201,8 @@ class _CairoDrawingContext:
             context.set_source_rgba(*rgbas[0][2::-1], rgbas[0][3])
             return
 
-        points = self.camera.transform_points_pre_display(
-            node.source,
+        points = self.camera._display_points(
+            node,
             np.array(node.payload.gradient),  # type: ignore[union-attr]
         )
         pattern = cairo.LinearGradient(
@@ -275,7 +274,7 @@ class _CairoDrawingContext:
         for node in nodes:
             cloud: RPoints = node.payload  # type: ignore[assignment]
             self._display_point_cloud(
-                node.source,
+                node,
                 cloud.points,
                 cloud.rgbas,
                 self._adjusted_thickness(cloud.stroke_width),
@@ -283,14 +282,14 @@ class _CairoDrawingContext:
 
     def _display_point_cloud(
         self,
-        mobject: Mobject,
+        node: RNode,
         points: Point3D_Array,
         rgbas: FloatRGBA_Array,
         thickness: float,
     ) -> None:
         if len(points) == 0:
             return
-        pixel_coords = self._points_to_pixel_coords(mobject, points)
+        pixel_coords = self._points_to_pixel_coords(node, points)
         pixel_coords = self._thickened_coordinates(pixel_coords, thickness)
         pixel_array = self.target.pixels
         rgba_len = pixel_array.shape[2]
@@ -334,7 +333,7 @@ class _CairoDrawingContext:
                 [sub_image.width, sub_image.height],
             ],
         )
-        target_coords = self._points_to_subpixel_coords(node.source, image.points)
+        target_coords = self._points_to_subpixel_coords(node, image.points)
         int_target_coords = target_coords.astype(np.int64)
         shift_vector = np.array(
             [
@@ -430,10 +429,10 @@ class _CairoDrawingContext:
 
     def _points_to_subpixel_coords(
         self,
-        mobject: Mobject,
+        node: RNode,
         points: Point3D_Array,
     ) -> np.ndarray:
-        points = self.camera.transform_points_pre_display(mobject, points)
+        points = self.camera._display_points(node, points)
         shifted_points = points - self.camera.frame_center
         settings = self.target.settings
         result = np.zeros((len(points), 2))
@@ -449,10 +448,10 @@ class _CairoDrawingContext:
 
     def _points_to_pixel_coords(
         self,
-        mobject: Mobject,
+        node: RNode,
         points: Point3D_Array,
     ) -> np.ndarray:
-        return self._points_to_subpixel_coords(mobject, points).astype(np.int64)
+        return self._points_to_subpixel_coords(node, points).astype(np.int64)
 
     def _on_screen_pixels(self, pixel_coords: np.ndarray) -> np.ndarray:
         settings = self.target.settings

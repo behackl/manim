@@ -11,8 +11,7 @@ def _samples(controls: np.ndarray, count: int) -> np.ndarray:
     t = np.linspace(0, 1, count)[:, None]
     degree = len(controls) - 1
     weights = [
-        math.comb(degree, i) * (1 - t) ** (degree - i) * t**i
-        for i in range(degree + 1)
+        math.comb(degree, i) * (1 - t) ** (degree - i) * t**i for i in range(degree + 1)
     ]
     return sum(w * c for w, c in zip(weights, controls, strict=True))
 

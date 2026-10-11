@@ -113,10 +113,12 @@ class RNode(NamedTuple):
     #: Version of each field of the mobject at extraction (see :func:`.field_version`).
     versions: Mapping[str, int]
     payload: Payload
-    #: The mobject the node was extracted from. Only for camera state that is not a
-    #: field yet (fixed in frame, fixed orientation); renderers must not read mobject
-    #: state through it.
-    source: Mobject
+    #: Drawn as if the camera were at its default position (see
+    #: :meth:`.Mobject.fix_in_frame`).
+    fixed_in_frame: bool
+    #: The point the mobject keeps facing the camera from, or ``None`` (see
+    #: :meth:`.Mobject.fix_orientation`).
+    fixed_orientation_center: Point3D | None
 
 
 def extract(
@@ -162,7 +164,12 @@ def extract(
                 z_index=mobject.z_index,
                 versions=_versions(mobject, _ARRAYS[type(payload)]),
                 payload=payload,
-                source=mobject,
+                fixed_in_frame=mobject.fixed_in_frame,
+                fixed_orientation_center=(
+                    None
+                    if mobject.fixed_orientation is None
+                    else np.asarray(mobject.fixed_orientation(), dtype=float)
+                ),
             )
         )
     return nodes

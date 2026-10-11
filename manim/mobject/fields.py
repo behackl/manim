@@ -38,6 +38,10 @@ _warned: set[tuple[type, str]] = set()
 # this field had before, which is all a reader needs.
 _next_version = itertools.count(1).__next__
 
+_UNSET: Any = object()
+# Types whose equal values are interchangeable and cheap to compare.
+_EQ_TYPES = (int, float, bool, str)
+
 
 class Field(Generic[T]):
     """A versioned property of a mobject.
@@ -73,6 +77,12 @@ class Field(Generic[T]):
     def __set__(self, obj: object, value: Any) -> None:
         name = self.name
         attributes = obj.__dict__
+        old = attributes.get(name, _UNSET)
+        # Assigning an equal value is not a change: keep the version.
+        if old is value or (
+            type(old) is type(value) and type(value) in _EQ_TYPES and old == value
+        ):
+            return
         attributes[name] = value
         try:
             attributes["_field_versions"][name] = _next_version()
@@ -87,7 +97,7 @@ class ArrayField(Field[T]):
     """A versioned array property of a mobject.
 
     Assigned values are converted to arrays of the field's dtype. In strict mode the
-    field stores a read-only copy.
+    field stores a read-only copy (or the value itself if it is read-only already).
 
     Parameters
     ----------
@@ -99,13 +109,22 @@ class ArrayField(Field[T]):
         self.dtype = dtype
 
     def __set__(self, obj: object, value: Any) -> None:
-        if STRICT:
-            array = np.array(value, dtype=self.dtype)
-            array.flags.writeable = False
-        else:
-            array = np.asarray(value, dtype=self.dtype)
         name = self.name
         attributes = obj.__dict__
+        # Assigning the array the field already holds is not a change.
+        if value is attributes.get(name):
+            return
+        if not STRICT:
+            array = np.asarray(value, dtype=self.dtype)
+        elif (
+            type(value) is np.ndarray
+            and not value.flags.writeable
+            and (self.dtype is None or value.dtype == self.dtype)
+        ):
+            array = value  # read-only already: safe to share
+        else:
+            array = np.array(value, dtype=self.dtype)
+            array.flags.writeable = False
         attributes[name] = array
         try:
             attributes["_field_versions"][name] = _next_version()

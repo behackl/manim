@@ -19,6 +19,7 @@ jobs:
       DISPLAY: :0
       PYTEST_ADDOPTS: "--color=yes" # colors in pytest
       PYTHONIOENCODING: "utf8"
+      MANIM_STRICT_FIELDS: "1" # field arrays are read-only; see manim/mobject/fields.py
     strategy:
       fail-fast: false
       matrix:

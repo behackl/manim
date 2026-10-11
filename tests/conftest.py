@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
+
+# The library must not modify field arrays in place; strict mode makes them read-only.
+# Set before manim is imported, and inherited by subprocesses that run manim.
+os.environ.setdefault("MANIM_STRICT_FIELDS", "1")
 
 import cairo
 import moderngl

@@ -22,6 +22,7 @@ from PIL.Image import Resampling
 
 from manim import config
 from manim.renderer.cairo.camera import ThreeDCamera
+from manim.renderer.cairo.mesh_faces import face_colours, face_outlines
 from manim.renderer.snapshot import RCameraView, RImage, RMesh, RNode, RPath, RPoints
 
 from .shader import Shader
@@ -53,8 +54,23 @@ _STROKE_DTYPE = [
 _STROKE_FORMAT = "3f 3f 3f 3f 1f 4f"
 _POINT_DTYPE = [("point", np.float32, (3,)), ("color", np.float32, (4,))]
 _MESH_DTYPE = np.dtype(
-    [("point", "f4", 3), ("normal", "f4", 3), ("color", "f4", 4), ("uv", "f4", 2)]
+    [
+        ("point", "f4", 3),
+        ("normal", "f4", 3),
+        ("color", "f4", 4),
+        ("uv", "f4", 2),
+        ("edge", "f4", 4),
+        ("stroke", "f4", 4),
+    ]
 )
+_MESH_FORMAT = "3f 3f 4f 2f 4f 4f"
+#: Per corner of a quad face (corners in order around it): its coordinates s, 1 - s,
+#: t, 1 - t, which are 0 on the side the outline is drawn along.
+_QUAD_EDGES = np.array(
+    [[0, 1, 0, 1], [1, 0, 0, 1], [1, 0, 1, 0], [0, 1, 1, 0]], dtype=np.float32
+)
+#: Per corner of a triangle face: its barycentric coordinates.
+_TRIANGLE_EDGES = np.array([[1, 0, 0, 1], [0, 1, 0, 1], [0, 0, 1, 1]], dtype=np.float32)
 _IMAGE_DTYPE = [("point", np.float32, (3,)), ("uv", np.float32, (2,))]
 # Two triangles over an image's corners, stored as upper left, upper right, lower
 # left, lower right; texture rows start at the top.
@@ -471,43 +487,101 @@ class SnapshotDrawing:
         count = len(mesh.points)
         if count == 0 or len(mesh.triangles) == 0:
             return
-        vertices = np.zeros(count, dtype=_MESH_DTYPE)
-        vertices["point"] = mesh.points
-        vertices["normal"] = self._normals.get(node, mesh)
         rgbas = np.asarray(mesh.rgbas)
-        vertices["color"] = (
-            rgbas if len(rgbas) == count else np.resize(rgbas, (count, 4))
-        )
         texture = None
-        if len(mesh.uvs) == count:
+        if len(mesh.uvs) == count and not mesh.shade_in_3d:
             texture = self._textures.get(node, "texture", mesh.texture)
+        if mesh.shade_in_3d or mesh.stroke_width > 0:
+            vertices, indices = self._faceted(node, mesh, texture is not None)
+        else:
+            vertices = np.zeros(count, dtype=_MESH_DTYPE)
+            vertices["point"] = mesh.points
+            vertices["normal"] = self._normals.get(node, mesh)
+            vertices["color"] = (
+                rgbas if len(rgbas) == count else np.resize(rgbas, (count, 4))
+            )
+            if texture is not None:
+                vertices["uv"] = mesh.uvs
+            indices = np.ascontiguousarray(mesh.triangles, dtype="i4")
         if texture is not None:
-            vertices["uv"] = mesh.uvs
             texture.use(0)
-        indices = np.ascontiguousarray(mesh.triangles, dtype="i4")
-        if mesh.depth_test and (rgbas[:, 3] < 1).any():
+        if mesh.depth_test and (vertices["color"][:, 3] < 1).any():
             # Translucent: show only the front-most layer of the mesh, so that how
             # its triangles are ordered does not show.
             framebuffer = self._target.framebuffer
             framebuffer.color_mask = False, False, False, False
             try:
                 self._pass(
-                    "mesh", vertices, "3f 3f 4f 2f", moderngl.TRIANGLES, indices, True
+                    "mesh", vertices, _MESH_FORMAT, moderngl.TRIANGLES, indices, True
                 )
             finally:
                 framebuffer.color_mask = True, True, True, True
+        # Outlines are as wide as a stroke on the Cairo renderer, half in each face.
+        pixels_per_unit = self._target.size[1] / self._target.view.frame_shape[1]
+        lit = not mesh.shade_in_3d
         self._pass(
             "mesh",
             vertices,
-            "3f 3f 4f 2f",
+            _MESH_FORMAT,
             moderngl.TRIANGLES,
             indices=indices,
             depth_test=mesh.depth_test,
-            gloss=float(mesh.gloss),
-            shadow=float(mesh.shadow),
+            gloss=float(mesh.gloss) if lit else 0.0,
+            shadow=float(mesh.shadow) if lit else 0.0,
             has_texture=float(texture is not None),
             image=0,
+            edge_width=0.5 * 0.01 * float(mesh.stroke_width) * pixels_per_unit,
         )
+
+    def _faceted(
+        self, node: RNode, mesh: RMesh, textured: bool
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Vertices of each face of its own, for outlines and faces shaded as on
+        the Cairo renderer, and the indices of their triangles.
+        """
+        faces = np.asarray(mesh.faces)
+        corners = np.asarray(mesh.points)[faces]
+        count, k = faces.shape
+        flat = faces.reshape(-1)
+        vertices = np.zeros(count * k, dtype=_MESH_DTYPE)
+        vertices["point"] = corners.reshape(-1, 3)
+        vertices["normal"] = self._normals.get(node, mesh)[flat]
+        stroke = np.asarray(mesh.stroke_rgbas)[:1]
+        if mesh.shade_in_3d:
+            outlines = face_outlines(corners)
+            camera = self._target.camera
+            colours = face_colours(mesh, faces)
+            fills = camera._shade_faces(outlines, colours)
+            strokes = camera._shade_faces(outlines, np.repeat(stroke, count, axis=0))
+            # Along the gradient from the first corner to the end corner, as a path.
+            start = outlines[:, 0]
+            axis = outlines[:, ((outlines.shape[1] - 1) // 6) * 3] - start
+            length = np.sum(axis * axis, axis=1)
+            t = np.sum((corners - start[:, None]) * axis[:, None], axis=2)
+            t = np.clip(t / np.where(length > 0, length, 1)[:, None], 0, 1)[..., None]
+            vertices["color"] = (fills[:, :1] * (1 - t) + fills[:, 1:] * t).reshape(
+                -1, 4
+            )
+            vertices["stroke"] = (
+                strokes[:, :1] * (1 - t) + strokes[:, 1:] * t
+            ).reshape(-1, 4)
+        else:
+            rgbas = np.asarray(mesh.rgbas)
+            vertices["color"] = (
+                rgbas[flat] if len(rgbas) == len(mesh.points) else rgbas[0]
+            )
+            vertices["stroke"] = stroke[0]
+            if textured:
+                vertices["uv"] = np.asarray(mesh.uvs)[flat]
+        if mesh.stroke_width > 0 and k in (3, 4):
+            vertices["edge"] = np.tile(
+                _QUAD_EDGES if k == 4 else _TRIANGLE_EDGES, (count, 1)
+            )
+        else:
+            vertices["edge"] = 1
+        fan = np.array([[0, i, i + 1] for i in range(1, k - 1)])
+        indices = (np.arange(count)[:, None, None] * k + fan).reshape(-1)
+        return vertices, np.ascontiguousarray(indices, dtype="i4")
 
     def _draw_image(self, node: RNode, image: RImage) -> None:
         texture = self._textures.get(

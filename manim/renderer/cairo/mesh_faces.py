@@ -19,16 +19,14 @@ from manim.utils.bezier import interpolate
 if TYPE_CHECKING:
     from .camera import Camera
 
-__all__ = ["mesh_faces"]
+__all__ = ["face_colours", "face_outlines", "mesh_faces"]
 
 #: Scene units per unit of stroke width on the Cairo renderer.
 _STROKE_WIDTH_UNIT = 0.01
 
 _NO_COLOR = np.zeros((1, 4))
 _NO_COLOR.flags.writeable = False
-#: Where the shading of a face's corners lies along its outline (see
-#: :func:`.three_d_utils._end_corner_index`): its first corner and two thirds of
-#: its second side.
+#: Where the anchors and handles of a straight cubic curve lie.
 _THIRDS = np.array([0, 1 / 3, 2 / 3, 1])
 
 
@@ -40,14 +38,10 @@ def mesh_faces(node: RNode, camera: Camera) -> list[RNode]:
         return []
     corners = np.asarray(mesh.points)[faces]
     centers = (corners.min(axis=1) + corners.max(axis=1)) / 2
-    colours = _face_colours(mesh, faces)
+    colours = face_colours(mesh, faces)
     if not mesh.shade_in_3d and (mesh.gloss or mesh.shadow):
         colours = _lit(colours, corners, centers, mesh.gloss, mesh.shadow, camera)
-    # Each side as a straight cubic curve, as VMobject.set_points_as_corners makes.
-    following = np.roll(corners, -1, axis=1)
-    outlines = interpolate(
-        corners[:, :, None, :], following[:, :, None, :], _THIRDS[:, None]
-    ).reshape(len(faces), -1, 3)
+    outlines = face_outlines(corners)
     end = ((outlines.shape[1] - 1) // 6) * 3
     depth = centers @ camera._view_rotation()[2]
     versions = node.versions
@@ -102,7 +96,17 @@ def mesh_faces(node: RNode, camera: Camera) -> list[RNode]:
     return nodes
 
 
-def _face_colours(mesh: RMesh, faces: np.ndarray) -> np.ndarray:
+def face_outlines(corners: np.ndarray) -> np.ndarray:
+    """The outlines of faces with corners of shape ``(m, k, 3)``: each side a
+    straight cubic curve, as :meth:`.VMobject.set_points_as_corners` makes them.
+    """
+    following = np.roll(corners, -1, axis=1)
+    return interpolate(
+        corners[:, :, None, :], following[:, :, None, :], _THIRDS[:, None]
+    ).reshape(len(corners), -1, 3)
+
+
+def face_colours(mesh: RMesh, faces: np.ndarray) -> np.ndarray:
     """One colour per face: the texture at its middle, or the mean of its corners."""
     rgbas = np.asarray(mesh.rgbas, dtype=float)
     count = len(mesh.points)

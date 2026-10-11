@@ -17,11 +17,12 @@ import itertools
 import logging
 import os
 import zlib
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, Generic, Self, TypeVar, overload
 
 import numpy as np
 
-__all__ = ["ArrayField", "Field", "field_version"]
+__all__ = ["ArrayField", "Field", "check_in_place_modifications", "field_version"]
 
 logger = logging.getLogger("manim")
 
@@ -117,26 +118,45 @@ def field_version(obj: object, name: str) -> int:
 
     The version changes with every assignment and is 0 while nothing has been
     assigned. Outside strict mode, an in-place modification of an array value since
-    the last call also increases it and logs a deprecation warning (once per class and
+    the last call also changes it and logs a deprecation warning (once per class and
     field).
     """
-    attributes = obj.__dict__
-    version: int = attributes.get("_field_versions", {}).get(name, 0)
-    value = attributes.get(name)
-    if STRICT or not isinstance(value, np.ndarray):
-        return version
-    checksum = zlib.crc32(np.ascontiguousarray(value))
-    checksums = attributes.setdefault("_field_checksums", {})
-    # A checksum is only comparable if no assignment happened since it was taken.
-    previous_version, previous_checksum = checksums.get(name, (None, None))
-    if previous_version == version and previous_checksum != checksum:
-        version = attributes["_field_versions"][name] = _next_version()
-        key = (type(obj), name)
-        if key not in _warned:
-            _warned.add(key)
-            logger.warning(
-                f"Modifying {type(obj).__name__}.{name} in place is deprecated and "
-                "will stop working in a future release; assign a new array instead."
-            )
-    checksums[name] = (version, checksum)
+    if not STRICT:
+        check_in_place_modifications(obj, (name,))
+    version: int = obj.__dict__.get("_field_versions", {}).get(name, 0)
     return version
+
+
+def check_in_place_modifications(obj: object, names: Iterable[str]) -> None:
+    """Give the array fields ``names`` of ``obj`` a new version if they were modified
+    in place since the last check, and log a deprecation warning (once per class and
+    field).
+
+    Does nothing in strict mode, where field arrays are read-only.
+    """
+    if STRICT:
+        return
+    attributes = obj.__dict__
+    versions = attributes.get("_field_versions")
+    if versions is None:
+        return
+    checksums = attributes.setdefault("_field_checksums", {})
+    for name in names:
+        value = attributes.get(name)
+        if not isinstance(value, np.ndarray):
+            continue
+        version = versions.get(name, 0)
+        checksum = zlib.crc32(np.ascontiguousarray(value))
+        # A checksum is only comparable if no assignment happened since it was taken.
+        previous = checksums.get(name)
+        if previous is not None and previous[0] == version and previous[1] != checksum:
+            version = versions[name] = _next_version()
+            key = (type(obj), name)
+            if key not in _warned:
+                _warned.add(key)
+                logger.warning(
+                    f"Modifying {type(obj).__name__}.{name} in place is deprecated "
+                    "and will stop working in a future release; assign a new array "
+                    "instead."
+                )
+        checksums[name] = (version, checksum)

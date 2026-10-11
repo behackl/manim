@@ -6,6 +6,7 @@ __all__ = ["Mobject", "Group", "override_animate"]
 
 
 import copy
+import enum
 import inspect
 import itertools as it
 import math
@@ -18,7 +19,7 @@ from collections.abc import Callable, Iterable, Iterator, MutableSet, Sequence
 from contextlib import suppress
 from functools import partialmethod, reduce
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
 
@@ -78,6 +79,20 @@ _Updater: TypeAlias = _NonTimeBasedUpdater | _TimeBasedUpdater
 _uids = it.count(1)
 
 
+# Values of these types cannot be modified, so copies share them.
+_IMMUTABLE_TYPES = (
+    int,
+    float,
+    complex,
+    str,
+    bytes,
+    type(None),
+    enum.Enum,
+    np.generic,
+    ManimColor,
+)
+
+
 class Mobject:
     """Mathematical Object: base class for objects that can be displayed on screen.
 
@@ -107,6 +122,10 @@ class Mobject:
     _hash_excluded_attributes = frozenset(
         {"uid", "_field_versions", "_field_checksums"}
     )
+
+    #: Attributes whose values are never modified after construction, so copies of
+    #: the mobject share them instead of copying them.
+    _shared_on_copy: ClassVar[frozenset[str]] = frozenset()
 
     original_id: str
     _original__init__: Callable[..., None]
@@ -466,10 +485,16 @@ class Mobject:
         result = cls.__new__(cls)
         clone_from_id[id(self)] = result
         attributes = result.__dict__
+        shared = cls._shared_on_copy
+        # Values that cannot change are shared with the copy: immutable scalars,
+        # read-only arrays (field values in strict mode) and the attributes a class
+        # lists in _shared_on_copy. Writing to __dict__ directly keeps field versions.
         for k, v in self.__dict__.items():
-            # Read-only arrays (field values in strict mode) cannot change, so the
-            # copy shares them. Writing to __dict__ directly keeps field versions.
-            if type(v) is np.ndarray and not v.flags.writeable:
+            if (
+                isinstance(v, _IMMUTABLE_TYPES)
+                or k in shared
+                or (type(v) is np.ndarray and not v.flags.writeable)
+            ):
                 attributes[k] = v
             elif k == "_field_versions":
                 attributes[k] = v.copy()

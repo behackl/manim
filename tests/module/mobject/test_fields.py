@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from manim import RED, RIGHT, Square
+from manim import RED, RIGHT, Circle, Square, VMobject
 from manim.mobject import fields
 from manim.mobject.fields import Field, field_version
 from manim.mobject.types.point_cloud_mobject import PMobject
@@ -96,3 +96,25 @@ def test_point_cloud_colors_use_opengl_storage_when_rebased(using_opengl_rendere
 
     assert "rgbas" not in cloud.__dict__
     assert cloud.rgbas is cloud.data["rgbas"]
+
+
+def test_animation_steps_that_change_nothing_keep_versions():
+    start, end = Square(), Circle().set_color(RED)
+    start.align_data(end)
+    moving = start.copy()
+
+    moving.interpolate(start, end, 1)
+    versions = {name: field_version(moving, name) for name in ("points", "fill_rgbas")}
+    moving.interpolate(start, end, 1)
+    assert {name: field_version(moving, name) for name in versions} == versions
+
+    moving.stroke_width = 2.5
+    version = field_version(moving, "stroke_width")
+    moving.stroke_width = float("2.5")  # equal, but another object
+    assert field_version(moving, "stroke_width") == version
+
+    partial = VMobject()
+    partial.pointwise_become_partial(end, 0, 1)
+    points_version = field_version(partial, "points")
+    partial.pointwise_become_partial(end, 0, 1)
+    assert field_version(partial, "points") == points_version

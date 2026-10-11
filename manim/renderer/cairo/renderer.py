@@ -139,7 +139,7 @@ class CairoRenderer(_RendererExecutionView):
                 / parent_camera.frame_width
             ),
         )
-        key = id(image_mobject)
+        key = image_mobject.uid
         target = self._sub_targets.get(key)
         if target is not None and (
             target.settings.pixel_width != pixel_width
@@ -193,17 +193,12 @@ class CairoRenderer(_RendererExecutionView):
                     excluded_mobjects=sub_excluded_mobjects,
                     camera_stack=next_stack,
                 )
-                self._camera_view_pixels[id(image_mobject)] = sub_target.pixels
-
-        def resolve_image(
-            image_mobject: ImageMobjectFromCamera,
-        ) -> RGBAPixelArray | None:
-            return self._camera_view_pixels.get(id(image_mobject))
+                self._camera_view_pixels[image_mobject.uid] = sub_target.pixels
 
         _CairoDrawingContext(
             camera=camera,
             target=target,
-            image_resolver=resolve_image,
+            image_resolver=self._camera_view_pixels.get,
         ).draw(
             mobject_list,
             include_submobjects=include_submobjects,

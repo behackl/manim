@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from PIL.Image import Image, Resampling
 
     from manim.constants import CapStyleType, LineJointType
-    from manim.renderer.cairo.camera import Camera
     from manim.typing import FloatRGBA_Array, PixelArray, Point3D, Point3D_Array
 
 __all__ = ["RCameraView", "RImage", "RNode", "RPath", "RPoints", "extract"]
@@ -61,14 +60,6 @@ class RPath(NamedTuple):
     #: Distance below which two points count as equal (closing subpaths).
     tolerance: float
 
-    ARRAYS = (
-        "points",
-        "fill_rgbas",
-        "stroke_rgbas",
-        "background_stroke_rgbas",
-        "sheen_direction",
-    )
-
 
 class RPoints(NamedTuple):
     """A point cloud (:class:`~.PMobject`)."""
@@ -76,8 +67,6 @@ class RPoints(NamedTuple):
     points: Point3D_Array
     rgbas: FloatRGBA_Array
     stroke_width: float
-
-    ARRAYS = ("points", "rgbas")
 
 
 class RImage(NamedTuple):
@@ -87,20 +76,32 @@ class RImage(NamedTuple):
     points: Point3D_Array
     resampling_algorithm: Resampling
 
-    ARRAYS = ("pixel_array", "points")
-
 
 class RCameraView(NamedTuple):
-    """The view of another camera (:class:`~.ImageMobjectFromCamera`)."""
+    """Where to show the view of another camera (:class:`~.ImageMobjectFromCamera`).
 
-    camera: Camera
+    The renderer supplies the pixels, looked up by the node's ``uid``.
+    """
+
     points: Point3D_Array
     resampling_algorithm: Resampling
 
-    ARRAYS = ("points",)
-
 
 Payload = RPath | RPoints | RImage | RCameraView
+
+# The array fields each payload is drawn from, checked for in-place modifications.
+_ARRAYS: dict[type, tuple[str, ...]] = {
+    RPath: (
+        "points",
+        "fill_rgbas",
+        "stroke_rgbas",
+        "background_stroke_rgbas",
+        "sheen_direction",
+    ),
+    RPoints: ("points", "rgbas"),
+    RImage: ("pixel_array", "points"),
+    RCameraView: ("points",),
+}
 
 
 class RNode(NamedTuple):
@@ -121,6 +122,7 @@ class RNode(NamedTuple):
 def extract(
     mobjects: Iterable[Mobject],
     *,
+    include_submobjects: bool = True,
     use_z_index: bool = True,
     excluded_mobjects: Iterable[Mobject] = (),
 ) -> list[RNode]:
@@ -128,21 +130,26 @@ def extract(
 
     The order is family order, without duplicates, stably sorted by ``z_index`` if
     ``use_z_index``. Families of ``excluded_mobjects`` and mobjects without points are
-    left out, as are plain :class:`~.Mobject` instances, which have nothing to draw.
+    left out. With ``include_submobjects=False``, ``mobjects`` are taken as given.
+    Plain :class:`~.Mobject` instances are always left out; they have nothing to draw.
 
     Raises
     ------
     TypeError
         If a mobject is of a type no renderer can draw.
     """
-    members = extract_mobject_family_members(
-        mobjects, use_z_index=use_z_index, only_those_with_points=True
-    )
-    excluded = list(excluded_mobjects)
-    if excluded:
-        members = list_difference_update(
-            members, extract_mobject_family_members(excluded, use_z_index=use_z_index)
+    if not include_submobjects:
+        members = list(mobjects)
+    else:
+        members = extract_mobject_family_members(
+            mobjects, use_z_index=use_z_index, only_those_with_points=True
         )
+        excluded = list(excluded_mobjects)
+        if excluded:
+            members = list_difference_update(
+                members,
+                extract_mobject_family_members(excluded, use_z_index=use_z_index),
+            )
     nodes = []
     for mobject in members:
         payload = _payload(mobject)
@@ -153,7 +160,7 @@ def extract(
                 uid=mobject.uid,
                 transform=IDENTITY,
                 z_index=mobject.z_index,
-                versions=_versions(mobject, payload.ARRAYS),
+                versions=_versions(mobject, _ARRAYS[type(payload)]),
                 payload=payload,
                 source=mobject,
             )
@@ -176,7 +183,7 @@ def _payload(mobject: Mobject) -> Payload | None:
             mobject.get_pixel_array(), mobject.points, mobject.resampling_algorithm
         )
     if isinstance(mobject, ImageMobjectFromCamera):
-        return RCameraView(mobject.camera, mobject.points, mobject.resampling_algorithm)
+        return RCameraView(mobject.points, mobject.resampling_algorithm)
     if isinstance(mobject, Mobject):
         return None
     raise TypeError(
@@ -206,7 +213,7 @@ def _path(vmobject: VMobject) -> RPath:
         background_image=vmobject.background_image,
         shade_in_3d=shade_in_3d,
         gradient=(
-            tuple(vmobject.get_gradient_start_and_end_points())  # type: ignore[arg-type]
+            tuple(vmobject.get_gradient_start_and_end_points())
             if has_gradient
             else None
         ),

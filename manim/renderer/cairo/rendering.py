@@ -14,12 +14,18 @@ from PIL import Image
 
 from manim.constants import CapStyleType, LineJointType
 from manim.mobject.mobject import Mobject
-from manim.mobject.types.image_mobject import (
-    AbstractImageMobject,
-    ImageMobjectFromCamera,
+from manim.mobject.types.vectorized_mobject import (
+    _points_equal_2d,
+    _subpath_split_indices,
 )
-from manim.mobject.types.point_cloud_mobject import PMobject
-from manim.mobject.types.vectorized_mobject import VMobject
+from manim.renderer.snapshot import (
+    RCameraView,
+    RImage,
+    RNode,
+    RPath,
+    RPoints,
+    extract,
+)
 from manim.utils.space_ops import cross2d
 
 from .target import _CairoRenderTarget
@@ -48,7 +54,8 @@ _CAP_STYLE_MAP = {
     CapStyleType.SQUARE: cairo.LineCap.SQUARE,
 }
 
-_ImageResolver = Callable[[ImageMobjectFromCamera], np.ndarray | None]
+#: Returns the pixels of a camera view, by the uid of its ``ImageMobjectFromCamera``.
+_ImageResolver = Callable[[int], np.ndarray | None]
 
 
 class _CairoDrawingContext:
@@ -73,72 +80,49 @@ class _CairoDrawingContext:
         excluded_mobjects: list[Mobject] | None = None,
     ) -> None:
         self.target._ensure_open()
-        display_funcs: dict[type[Mobject], Callable[[list[Any]], None]] = {
-            VMobject: self._display_vectorized_mobjects,
-            PMobject: self._display_point_cloud_mobjects,
-            ImageMobjectFromCamera: self._display_image_mobjects,
-            AbstractImageMobject: self._display_image_mobjects,
-            Mobject: lambda batch: None,
-        }
-
-        def type_or_raise(mobject: Mobject) -> type[Mobject]:
-            for mobject_type in display_funcs:
-                if isinstance(mobject, mobject_type):
-                    return mobject_type
-            raise TypeError(
-                f"Displaying an object of class {type(mobject).__name__} is not supported",
-            )
-
         self.camera._prepare_for_render()
-        to_display = self.camera.get_mobjects_to_display(
-            mobjects,
-            include_submobjects=include_submobjects,
-            excluded_mobjects=excluded_mobjects,
+        nodes = self.camera._sort_for_display(
+            extract(
+                mobjects,
+                include_submobjects=include_submobjects,
+                use_z_index=self.camera.use_z_index,
+                excluded_mobjects=excluded_mobjects or (),
+            )
         )
-        for group_type, group in it.groupby(to_display, type_or_raise):
-            display_funcs[group_type](list(group))
-
-    def _display_vectorized_mobjects(self, vmobjects: list[VMobject]) -> None:
-        if not vmobjects:
-            return
-        for image, batch in it.groupby(
-            vmobjects,
-            lambda vmobject: vmobject.get_background_image(),
-        ):
-            if image:
-                self._display_background_colored_vmobjects(list(batch))
+        for payload_type, group in it.groupby(nodes, lambda node: type(node.payload)):
+            if payload_type is RPath:
+                self._display_paths(list(group))
+            elif payload_type is RPoints:
+                self._display_point_clouds(group)
             else:
-                self._display_non_background_colored_vmobjects(batch)
+                self._display_images(group)
 
-    def _display_non_background_colored_vmobjects(
-        self,
-        vmobjects: Iterable[VMobject],
-    ) -> None:
+    def _display_paths(self, nodes: list[RNode]) -> None:
+        for image, batch in it.groupby(nodes, _background_image):
+            if image:
+                self._display_background_colored_paths(list(batch))
+            else:
+                self._display_non_background_colored_paths(batch)
+
+    def _display_non_background_colored_paths(self, nodes: Iterable[RNode]) -> None:
         context = self.target.get_context(self.camera)
-        for vmobject in vmobjects:
-            self._display_vectorized(vmobject, context)
+        for node in nodes:
+            self._display_path(node, context)
 
-    def _display_vectorized(
-        self,
-        vmobject: VMobject,
-        context: cairo.Context,
-    ) -> None:
-        self._set_cairo_context_path(context, vmobject)
-        self._apply_stroke(context, vmobject, background=True)
-        self._apply_fill(context, vmobject)
-        self._apply_stroke(context, vmobject)
+    def _display_path(self, node: RNode, context: cairo.Context) -> None:
+        self._set_cairo_context_path(context, node)
+        self._apply_stroke(context, node, background=True)
+        self._apply_fill(context, node)
+        self._apply_stroke(context, node)
 
-    def _set_cairo_context_path(
-        self,
-        context: cairo.Context,
-        vmobject: VMobject,
-    ) -> None:
-        points = self.camera.transform_points_pre_display(vmobject, vmobject.points)
+    def _set_cairo_context_path(self, context: cairo.Context, node: RNode) -> None:
+        path: RPath = node.payload  # type: ignore[assignment]
+        points = self.camera.transform_points_pre_display(node.source, path.points)
         if len(points) == 0:
             return
 
-        nppcc = vmobject.n_points_per_cubic_curve
-        split_indices = vmobject.get_subpath_split_indices_from_points(points, n_dims=2)
+        nppcc = 4
+        split_indices = _subpath_split_indices(points, path.tolerance, n_dims=2)
         if len(split_indices) == 0:
             return
 
@@ -172,9 +156,10 @@ class _CairoDrawingContext:
                     points_xy[handle + 4],
                     points_xy[handle + 5],
                 )
-            if vmobject.consider_points_equals_2d(
+            if _points_equal_2d(
                 points[start_index],
                 points[end_index - 1],
+                path.tolerance,
             ):
                 close_path()
 
@@ -182,14 +167,16 @@ class _CairoDrawingContext:
         self,
         context: cairo.Context,
         rgbas: FloatRGBALike_Array,
-        vmobject: VMobject,
+        node: RNode,
     ) -> None:
         if len(rgbas) == 1:
             context.set_source_rgba(*rgbas[0][2::-1], rgbas[0][3])
             return
 
-        points = vmobject.get_gradient_start_and_end_points()
-        points = self.camera.transform_points_pre_display(vmobject, points)
+        points = self.camera.transform_points_pre_display(
+            node.source,
+            np.array(node.payload.gradient),  # type: ignore[union-attr]
+        )
         pattern = cairo.LinearGradient(
             *it.chain(*(point[:2] for point in points)),
         )
@@ -201,39 +188,41 @@ class _CairoDrawingContext:
             pattern.add_color_stop_rgba(offset, *rgba[2::-1], rgba[3])
         context.set_source(pattern)
 
-    def _apply_fill(self, context: cairo.Context, vmobject: VMobject) -> None:
+    def _apply_fill(self, context: cairo.Context, node: RNode) -> None:
+        path: RPath = node.payload  # type: ignore[assignment]
         self._set_cairo_context_color(
             context,
-            self.camera.get_fill_rgbas(vmobject),
-            vmobject,
+            self.camera._shaded_rgbas(path, path.fill_rgbas),
+            node,
         )
         context.fill_preserve()
 
     def _apply_stroke(
         self,
         context: cairo.Context,
-        vmobject: VMobject,
+        node: RNode,
         background: bool = False,
     ) -> None:
-        width = vmobject.get_stroke_width(background)
+        path: RPath = node.payload  # type: ignore[assignment]
+        if background:
+            width, rgbas = path.background_stroke_width, path.background_stroke_rgbas
+        else:
+            width, rgbas = path.stroke_width, path.stroke_rgbas
         if width == 0:
             return
         self._set_cairo_context_color(
             context,
-            self.camera.get_stroke_rgbas(vmobject, background=background),
-            vmobject,
+            self.camera._shaded_rgbas(path, rgbas),
+            node,
         )
         context.set_line_width(
             width * self.target.settings.cairo_line_width_multiple,
         )
-        context.set_line_join(_LINE_JOIN_MAP[vmobject.joint_type])
-        context.set_line_cap(_CAP_STYLE_MAP[vmobject.cap_style])
+        context.set_line_join(_LINE_JOIN_MAP[path.joint_type])
+        context.set_line_cap(_CAP_STYLE_MAP[path.cap_style])
         context.stroke_preserve()
 
-    def _display_background_colored_vmobjects(
-        self,
-        vmobjects: list[VMobject],
-    ) -> None:
+    def _display_background_colored_paths(self, nodes: list[RNode]) -> None:
         scratch = self.target.get_scratch_target()
         scratch_context = _CairoDrawingContext(
             camera=self.camera,
@@ -241,12 +230,9 @@ class _CairoDrawingContext:
             image_resolver=self.image_resolver,
         )
         current: RGBAPixelArray | None = None
-        for image, batch in it.groupby(
-            vmobjects,
-            lambda vmobject: vmobject.get_background_image(),
-        ):
+        for image, batch in it.groupby(nodes, _background_image):
             scratch.clear()
-            scratch_context._display_non_background_colored_vmobjects(batch)
+            scratch_context._display_non_background_colored_paths(batch)
             background = self.target.get_background_image(image)
             colored = np.asarray(
                 background * scratch.pixels.astype(float) / 255,
@@ -256,25 +242,26 @@ class _CairoDrawingContext:
         if current is not None:
             self._overlay_rgba_array(self.target.pixels, current)
 
-    def _display_point_cloud_mobjects(self, pmobjects: list[PMobject]) -> None:
-        for pmobject in pmobjects:
+    def _display_point_clouds(self, nodes: Iterable[RNode]) -> None:
+        for node in nodes:
+            cloud: RPoints = node.payload  # type: ignore[assignment]
             self._display_point_cloud(
-                pmobject,
-                pmobject.points,
-                pmobject.rgbas,
-                self._adjusted_thickness(pmobject.stroke_width),
+                node.source,
+                cloud.points,
+                cloud.rgbas,
+                self._adjusted_thickness(cloud.stroke_width),
             )
 
     def _display_point_cloud(
         self,
-        pmobject: PMobject,
+        mobject: Mobject,
         points: Point3D_Array,
         rgbas: FloatRGBA_Array,
         thickness: float,
     ) -> None:
         if len(points) == 0:
             return
-        pixel_coords = self._points_to_pixel_coords(pmobject, points)
+        pixel_coords = self._points_to_pixel_coords(mobject, points)
         pixel_coords = self._thickened_coordinates(pixel_coords, thickness)
         pixel_array = self.target.pixels
         rgba_len = pixel_array.shape[2]
@@ -296,21 +283,16 @@ class _CairoDrawingContext:
         flattened[indices] = int_rgbas
         pixel_array[:, :] = flattened.reshape((height, width, rgba_len))
 
-    def _display_image_mobjects(
-        self,
-        image_mobjects: list[AbstractImageMobject | ImageMobjectFromCamera],
-    ) -> None:
-        for image_mobject in image_mobjects:
-            self._display_image_mobject(image_mobject)
+    def _display_images(self, nodes: Iterable[RNode]) -> None:
+        for node in nodes:
+            self._display_image(node)
 
-    def _display_image_mobject(
-        self,
-        image_mobject: AbstractImageMobject | ImageMobjectFromCamera,
-    ) -> None:
+    def _display_image(self, node: RNode) -> None:
+        image: RImage | RCameraView = node.payload  # type: ignore[assignment]
         source_pixels = (
-            self.image_resolver(image_mobject)
-            if isinstance(image_mobject, ImageMobjectFromCamera)
-            else image_mobject.get_pixel_array()
+            self.image_resolver(node.uid)
+            if isinstance(image, RCameraView)
+            else image.pixel_array
         )
         if source_pixels is None:
             return
@@ -323,10 +305,7 @@ class _CairoDrawingContext:
                 [sub_image.width, sub_image.height],
             ],
         )
-        target_coords = self._points_to_subpixel_coords(
-            image_mobject,
-            image_mobject.points,
-        )
+        target_coords = self._points_to_subpixel_coords(node.source, image.points)
         int_target_coords = target_coords.astype(np.int64)
         shift_vector = np.array(
             [
@@ -384,7 +363,7 @@ class _CairoDrawingContext:
             size=target_size,
             method=Image.Transform.PERSPECTIVE,
             data=coefficients,
-            resample=image_mobject.resampling_algorithm,
+            resample=image.resampling_algorithm,
         )
         settings = self.target.settings
         full_image = Image.new(
@@ -476,3 +455,8 @@ class _CairoDrawingContext:
         nudges = np.array(list(it.product(coordinate_range, coordinate_range)))
         thickened = np.array([pixel_coords + nudge for nudge in nudges])
         return thickened.reshape((thickened.size // 2, 2))
+
+
+def _background_image(node: RNode) -> Any:
+    path: RPath = node.payload  # type: ignore[assignment]
+    return path.background_image

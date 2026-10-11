@@ -16,10 +16,10 @@ from manim.constants import DEGREES, DOWN, LEFT, ORIGIN, OUT, RIGHT, UP
 from manim.mobject.frame import ScreenRectangle
 from manim.mobject.mobject import Mobject, _AnimationBuilder
 from manim.mobject.three_d.three_d_utils import (
-    get_3d_vmob_end_corner,
-    get_3d_vmob_end_corner_unit_normal,
-    get_3d_vmob_start_corner,
-    get_3d_vmob_start_corner_unit_normal,
+    _end_corner,
+    _end_corner_index,
+    _start_corner,
+    _unit_normal,
 )
 from manim.mobject.types.image_mobject import ImageMobjectFromCamera
 from manim.mobject.types.point_cloud_mobject import Point
@@ -31,6 +31,7 @@ from manim.utils.iterables import list_difference_update
 from manim.utils.space_ops import rotation_about_z, rotation_matrix
 
 if TYPE_CHECKING:
+    from manim.renderer.snapshot import RNode, RPath
     from manim.typing import (
         FloatRGBA_Array,
         MatrixMN,
@@ -320,6 +321,14 @@ class Camera:
         """Return fill colors after camera-specific shading."""
         return vmobject.get_fill_rgbas()
 
+    def _sort_for_display(self, nodes: list[RNode]) -> list[RNode]:
+        """Reorder render snapshots for this camera (after family and z-index order)."""
+        return nodes
+
+    def _shaded_rgbas(self, path: RPath, rgbas: FloatRGBA_Array) -> FloatRGBA_Array:
+        """Return the colors of a snapshot path after camera-specific shading."""
+        return rgbas
+
     def transform_points_pre_display(
         self,
         mobject: Mobject,
@@ -453,9 +462,17 @@ class ThreeDCamera(Camera):
     def modified_rgbas(
         self, vmobject: VMobject, rgbas: FloatRGBA_Array
     ) -> FloatRGBA_Array:
+        return self._shade(vmobject.shade_in_3d, vmobject.points, rgbas)
+
+    def _shaded_rgbas(self, path: RPath, rgbas: FloatRGBA_Array) -> FloatRGBA_Array:
+        return self._shade(path.shade_in_3d, path.points, rgbas)
+
+    def _shade(
+        self, shade_in_3d: bool, points: Point3D_Array, rgbas: FloatRGBA_Array
+    ) -> FloatRGBA_Array:
         if not self.should_apply_shading:
             return rgbas
-        if vmobject.shade_in_3d and (vmobject.get_num_points() > 0):
+        if shade_in_3d and len(points) > 0:
             light_source_point = self.light_source.points[0]
             if len(rgbas) < 2:
                 shaded_rgbas = rgbas.repeat(2, axis=0)
@@ -463,14 +480,15 @@ class ThreeDCamera(Camera):
                 shaded_rgbas = np.array(rgbas[:2])
             shaded_rgbas[0, :3] = get_shaded_rgb(
                 shaded_rgbas[0, :3],
-                get_3d_vmob_start_corner(vmobject),
-                get_3d_vmob_start_corner_unit_normal(vmobject),
+                _start_corner(points),
+                _unit_normal(points, 0),
                 light_source_point,
             )
+            end = _end_corner_index(points)
             shaded_rgbas[1, :3] = get_shaded_rgb(
                 shaded_rgbas[1, :3],
-                get_3d_vmob_end_corner(vmobject),
-                get_3d_vmob_end_corner_unit_normal(vmobject),
+                _end_corner(points),
+                _unit_normal(points, end),
                 light_source_point,
             )
             return shaded_rgbas
@@ -497,12 +515,28 @@ class ThreeDCamera(Camera):
         def z_key(mob: Mobject) -> float:
             if not (hasattr(mob, "shade_in_3d") and mob.shade_in_3d):
                 return np.inf  # type: ignore[no-any-return]
-            # Assign a number to a three dimensional mobjects
-            # based on how close it is to the camera
-            distance: float = np.dot(mob.get_z_index_reference_point(), rot_matrix.T)[2]
-            return distance
+            return self._depth(mob.get_z_index_reference_point(), rot_matrix)
 
         return sorted(mobjects, key=z_key)
+
+    def _sort_for_display(self, nodes: list[RNode]) -> list[RNode]:
+        rot_matrix = self.get_rotation_matrix()
+
+        def z_key(node: RNode) -> float:
+            reference_point = getattr(node.payload, "z_reference_point", None)
+            if reference_point is None:
+                return np.inf  # type: ignore[no-any-return]
+            return self._depth(reference_point, rot_matrix)
+
+        return sorted(nodes, key=z_key)
+
+    @staticmethod
+    def _depth(point: Point3D, rot_matrix: MatrixMN) -> float:
+        """Assign a number to a three dimensional mobject based on how close it is
+        to the camera.
+        """
+        distance: float = np.dot(point, rot_matrix.T)[2]
+        return distance
 
     def get_phi(self) -> float:
         """Returns the Polar angle (the angle off Z_AXIS) phi.

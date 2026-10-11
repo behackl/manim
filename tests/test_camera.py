@@ -165,7 +165,7 @@ def test_nested_view_preserves_square_geometry():
             renderer.render_mobjects(
                 [Square(fill_color="#ffffff", fill_opacity=1, stroke_width=0), view]
             )
-            pixels = renderer._sub_targets[id(view)].read_pixels()
+            pixels = renderer._sub_targets[view.uid].read_pixels()
             rows, columns = np.where(pixels[:, :, 0] > 128)
             assert len(rows) > 0
             assert np.ptp(columns) == pytest.approx(np.ptp(rows), abs=1)

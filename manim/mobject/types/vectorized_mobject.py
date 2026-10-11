@@ -20,11 +20,13 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 from PIL.Image import Image
 
-from manim import config
 from manim.constants import *
 from manim.mobject.fields import ArrayField, Field
 from manim.mobject.mobject import Mobject, _interpolated
-from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
+from manim.mobject.opengl.opengl_compatibility import (
+    ConvertToOpenGL,
+    uses_opengl_mobjects,
+)
 from manim.mobject.opengl.opengl_mobject import OpenGLMobject
 from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVMobject
 from manim.mobject.three_d.three_d_utils import (
@@ -2359,9 +2361,7 @@ class VGroup(VMobject, metaclass=ConvertToOpenGL):
                 f"{type(invalid_obj).__name__}."
             )
 
-        vmobject_render_type = (
-            OpenGLVMobject if config.renderer == RendererType.OPENGL else VMobject
-        )
+        vmobject_render_type = OpenGLVMobject if uses_opengl_mobjects() else VMobject
         valid_vmobjects = []
 
         for i, vmobject in enumerate(vmobjects):
@@ -2787,7 +2787,7 @@ class VectorizedPoint(VMobject, metaclass=ConvertToOpenGL):
         )
         self.set_points(np.array([location]))
 
-    basecls = OpenGLVMobject if config.renderer == RendererType.OPENGL else VMobject
+    basecls = OpenGLVMobject if uses_opengl_mobjects() else VMobject
 
     @basecls.width.getter
     def width(self) -> float:
@@ -3061,7 +3061,7 @@ class DashedVMobject(VMobject, metaclass=ConvertToOpenGL):
                 )
         # Family is already taken care of by get_subcurve
         # implementation
-        if config.renderer == RendererType.OPENGL:
+        if uses_opengl_mobjects():
             self.match_style(base_vmobject, recurse=False)
         else:
             self.match_style(base_vmobject, family=False)

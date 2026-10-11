@@ -8,6 +8,7 @@ Thematic Guides
 
    configuration
    cameras
+   opengl_mobjects_migration
    evaluation
    timeline
    deep_dive

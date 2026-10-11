@@ -5,7 +5,7 @@ from __future__ import annotations
 __all__ = ["PMobject", "Mobject1D", "Mobject2D", "PGroup", "PointCloudDot", "Point"]
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import numpy as np
 
@@ -13,6 +13,7 @@ from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
 from manim.mobject.opengl.opengl_point_cloud_mobject import OpenGLPMobject
 
 from ...constants import *
+from ...mobject.fields import ArrayField, Field
 from ...mobject.mobject import Mobject
 from ...utils.bezier import interpolate
 from ...utils.color import (
@@ -44,6 +45,44 @@ if TYPE_CHECKING:
     )
 
 
+T = TypeVar("T")
+
+
+class _RebasableArrayField(ArrayField[T]):
+    """An :class:`ArrayField` that steps aside when ``ConvertToOpenGL`` rebased its class.
+
+    Rebased classes have ``OpenGLMobject`` instead of ``Mobject`` as a base, which keeps
+    its own descriptor for the same name. Remove together with ``ConvertToOpenGL``.
+    """
+
+    def _rebased(self, obj: object) -> Any:
+        mro = type(obj).__mro__
+        for klass in mro[mro.index(self.owner) + 1 :]:
+            if self.name in vars(klass):
+                return vars(klass)[self.name]
+        raise AttributeError(self.name)
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        super().__set_name__(owner, name)
+        self.owner = owner
+
+    def __get__(self, obj: Any, owner: type | None = None) -> Any:
+        if obj is None:
+            return self
+        if not isinstance(obj, Mobject):
+            return self._rebased(obj).__get__(obj, owner)
+        try:
+            return obj.__dict__[self.name]
+        except KeyError:
+            raise AttributeError(self.name) from None
+
+    def __set__(self, obj: object, value: Any) -> None:
+        if not isinstance(obj, Mobject):
+            self._rebased(obj).__set__(obj, value)
+        else:
+            super().__set__(obj, value)
+
+
 class PMobject(Mobject, metaclass=ConvertToOpenGL):
     """A disc made of a cloud of Dots
 
@@ -72,6 +111,9 @@ class PMobject(Mobject, metaclass=ConvertToOpenGL):
                 self.add(pG)
 
     """
+
+    rgbas: _RebasableArrayField[FloatRGBA_Array] = _RebasableArrayField(np.float64)
+    stroke_width: Field[float] = Field()
 
     def __init__(self, stroke_width: int = DEFAULT_STROKE_WIDTH, **kwargs: Any) -> None:
         self.stroke_width = stroke_width

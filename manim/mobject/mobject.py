@@ -44,7 +44,7 @@ from ..utils.iterables import (
 from ..utils.paths import straight_path
 from ..utils.simple_functions import clip
 from ..utils.space_ops import angle_between_vectors, normalize, rotation_matrix
-from .fields import ArrayField
+from .fields import ArrayField, Field
 
 if TYPE_CHECKING:
     from typing import Self, TypeAlias
@@ -97,6 +97,7 @@ class Mobject:
     """
 
     points: ArrayField[Point3D_Array] = ArrayField(np.float64)
+    z_index: Field[float] = Field()
     _hash_excluded_attributes = frozenset({"_field_versions", "_field_checksums"})
 
     original_id: str

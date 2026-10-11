@@ -9,9 +9,6 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 import numpy as np
 
-from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
-from manim.mobject.opengl.opengl_point_cloud_mobject import OpenGLPMobject
-
 from ...constants import *
 from ...mobject.fields import ArrayField, Field
 from ...mobject.mobject import Mobject
@@ -48,42 +45,7 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
-class _RebasableArrayField(ArrayField[T]):
-    """An :class:`ArrayField` that steps aside when ``ConvertToOpenGL`` rebased its class.
-
-    Rebased classes have ``OpenGLMobject`` instead of ``Mobject`` as a base, which keeps
-    its own descriptor for the same name. Remove together with ``ConvertToOpenGL``.
-    """
-
-    def _rebased(self, obj: object) -> Any:
-        mro = type(obj).__mro__
-        for klass in mro[mro.index(self.owner) + 1 :]:
-            if self.name in vars(klass):
-                return vars(klass)[self.name]
-        raise AttributeError(self.name)
-
-    def __set_name__(self, owner: type, name: str) -> None:
-        super().__set_name__(owner, name)
-        self.owner = owner
-
-    def __get__(self, obj: Any, owner: type | None = None) -> Any:
-        if obj is None:
-            return self
-        if not isinstance(obj, Mobject):
-            return self._rebased(obj).__get__(obj, owner)
-        try:
-            return obj.__dict__[self.name]
-        except KeyError:
-            raise AttributeError(self.name) from None
-
-    def __set__(self, obj: object, value: Any) -> None:
-        if not isinstance(obj, Mobject):
-            self._rebased(obj).__set__(obj, value)
-        else:
-            super().__set__(obj, value)
-
-
-class PMobject(Mobject, metaclass=ConvertToOpenGL):
+class PMobject(Mobject):
     """A disc made of a cloud of Dots
 
     Examples
@@ -112,7 +74,7 @@ class PMobject(Mobject, metaclass=ConvertToOpenGL):
 
     """
 
-    rgbas: _RebasableArrayField[FloatRGBA_Array] = _RebasableArrayField(np.float64)
+    rgbas: ArrayField[FloatRGBA_Array] = ArrayField(np.float64)
     stroke_width: Field[float] = Field()
 
     def __init__(self, stroke_width: int = DEFAULT_STROKE_WIDTH, **kwargs: Any) -> None:
@@ -293,7 +255,7 @@ class PMobject(Mobject, metaclass=ConvertToOpenGL):
 
 
 # TODO, Make the two implementations below non-redundant
-class Mobject1D(PMobject, metaclass=ConvertToOpenGL):
+class Mobject1D(PMobject):
     def __init__(self, density: int = DEFAULT_POINT_DENSITY_1D, **kwargs: Any) -> None:
         self.density = density
         self.epsilon = 1.0 / self.density
@@ -319,7 +281,7 @@ class Mobject1D(PMobject, metaclass=ConvertToOpenGL):
         return self
 
 
-class Mobject2D(PMobject, metaclass=ConvertToOpenGL):
+class Mobject2D(PMobject):
     def __init__(self, density: int = DEFAULT_POINT_DENSITY_2D, **kwargs: Any) -> None:
         self.density = density
         self.epsilon = 1.0 / self.density
@@ -350,10 +312,9 @@ class PGroup(PMobject):
     """
 
     def __init__(self, *pmobs: Any, **kwargs: Any) -> None:
-        if not all(isinstance(m, (PMobject, OpenGLPMobject)) for m in pmobs):
+        if not all(isinstance(m, PMobject) for m in pmobs):
             raise ValueError(
-                "All submobjects must be of type PMobject or OpenGLPMObject"
-                " if using the opengl renderer",
+                "All submobjects must be of type PMobject",
             )
         super().__init__(**kwargs)
         self.add(*pmobs)
@@ -415,11 +376,6 @@ class PointCloudDot(Mobject1D):
         )
         self.shift(center)
 
-    def init_points(self) -> Self:
-        self.reset_points()
-        self.generate_points()
-        return self
-
     def generate_points(self) -> Self:
         self.add_points(
             np.array(
@@ -464,12 +420,6 @@ class Point(PMobject):
     ) -> None:
         self.location = location
         super().__init__(color=color, **kwargs)
-
-    def init_points(self) -> Self:
-        self.reset_points()
-        self.generate_points()
-        self.set_points([self.location])
-        return self
 
     def generate_points(self) -> Self:
         self.add_points(np.array([self.location]))

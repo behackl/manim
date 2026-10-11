@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from manim import (
     BLUE,
@@ -140,7 +141,7 @@ def _image(renderer, build, scene_class=Scene):
     ],
     ids=lambda build: build.__name__.strip("_"),
 )
-def test_drawing_matches_cairo(opengl_common_mobjects, build):
+def test_drawing_matches_cairo(using_opengl_renderer, build):
     cairo = _image("cairo", build)
     opengl = _image("opengl", build)
 
@@ -187,9 +188,34 @@ def _fixed_in_moved_frame(scene):
     ],
     ids=["camera_view", "fixed_in_3d", "fixed_in_moved_frame"],
 )
-def test_scenes_match_cairo(opengl_common_mobjects, scene_class, build):
+def test_scenes_match_cairo(using_opengl_renderer, scene_class, build):
     cairo = _image("cairo", build, scene_class)
     opengl = _image("opengl", build, scene_class)
 
     assert opengl.sum() == pytest.approx(cairo.sum(), rel=0.05)
     assert np.abs(opengl - cairo).mean() < 0.01
+
+
+def _red_over_blue(height, width):
+    pixels = np.zeros((height, width, 3), dtype=np.uint8)
+    pixels[: height // 2, :, 0] = 255
+    pixels[height // 2 :, :, 2] = 255
+    return pixels
+
+
+@pytest.mark.parametrize("source", ["file", "array"])
+def test_images_show_their_pixels(using_opengl_renderer, tmp_path, source):
+    pixels = _red_over_blue(4, 6)
+    if source == "file":
+        path = tmp_path / "red_over_blue.png"
+        Image.fromarray(_red_over_blue(64, 64)).save(path)
+        image = ImageMobject(path).scale_to_fit_height(4)
+    else:
+        image = ImageMobject(pixels).scale_to_fit_height(4)
+    scene = Scene()
+    scene.add(image)
+    frame = np.asarray(scene.get_image().convert("RGB"))
+    height, width, _ = frame.shape
+    # The centers of the image's upper and lower halves.
+    np.testing.assert_array_equal(frame[int(height * 3 / 8), width // 2], [255, 0, 0])
+    np.testing.assert_array_equal(frame[int(height * 5 / 8), width // 2], [0, 0, 255])

@@ -34,7 +34,7 @@ except ImportError:
 
 from collections.abc import Callable, Iterable, Sequence
 from types import FrameType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from tqdm import tqdm
@@ -44,7 +44,6 @@ from watchdog.observers import Observer
 from manim import __version__
 from manim.data_structures import MethodWithArgs
 from manim.mobject.mobject import Mobject
-from manim.mobject.opengl.opengl_mobject import OpenGLMobject, OpenGLPoint
 
 from .. import config, logger
 from .._config.output_plan import (
@@ -59,16 +58,13 @@ from .._run.frames import frame_count
 from ..animation.animation import Animation, Wait, prepare_animation
 from ..constants import *
 from ..manager import Manager
-from ..mobject.opengl.opengl_compatibility import uses_opengl_mobjects
 from ..mobject.types.point_cloud_mobject import Point
 from ..renderer.cairo import CairoRenderer
 from ..renderer.cairo.camera import Camera, ThreeDCamera
 from ..renderer.opengl.renderer import OpenGLRenderer
-from ..renderer.opengl.shader import Object3D
 from ..scene.scene_file_writer import _SceneFileWriterSettings
 from ..utils.exceptions import RerunSceneException
 from ..utils.family import extract_mobject_family_members
-from ..utils.family_ops import restructure_list_to_exclude_certain_family_members
 from ..utils.iterables import list_difference_update, list_update
 from ..utils.module_ops import scene_classes_from_file
 
@@ -208,7 +204,6 @@ class Scene:
         self.last_t = 0.0
         self.queue: Queue[SceneInteractAction] = Queue()
         self.skip_animation_preview = False
-        self.meshes: list[Object3D] = []
         self.widgets: list[dict[str, Any]] = []
         self.dearpygui_imported = dearpygui_imported
         self.updaters: list[Callable[[float], None]] = []
@@ -219,9 +214,8 @@ class Scene:
 
         if config.renderer == RendererType.OPENGL:
             # Items associated with interaction
-            point_class = OpenGLPoint if uses_opengl_mobjects() else Point
-            self.mouse_point = point_class()
-            self.mouse_drag_point = point_class()
+            self.mouse_point = Point()
+            self.mouse_drag_point = Point()
             if renderer is None:
                 renderer = OpenGLRenderer(camera_class=self.camera_class)
 
@@ -477,11 +471,6 @@ class Scene:
         for mobj in self.mobjects:
             mobj.update(dt)
 
-    def update_meshes(self, dt: float) -> None:
-        for obj in self.meshes:
-            for mesh in obj.get_family():
-                mesh.update(dt)
-
     def update_self(self, dt: float) -> None:
         """Run all scene updater functions.
 
@@ -561,18 +550,12 @@ class Scene:
         list
             List of mobject family members.
         """
-        if uses_opengl_mobjects():
-            family_members = []
-            for mob in self.mobjects:
-                family_members.extend(mob.get_family())
-            return family_members
-        else:
-            return extract_mobject_family_members(
-                self.mobjects,
-                use_z_index=self.renderer.camera.use_z_index,
-            )
+        return extract_mobject_family_members(
+            self.mobjects,
+            use_z_index=self.renderer.camera.use_z_index,
+        )
 
-    def add(self, *mobjects: Mobject | OpenGLMobject) -> Self:
+    def add(self, *mobjects: Mobject) -> Self:
         """
         Mobjects will be displayed, from background to
         foreground in the order with which they are added.
@@ -588,27 +571,18 @@ class Scene:
             The same scene after adding the Mobjects in.
 
         """
-        new_meshes = [cast(Object3D, m) for m in mobjects if isinstance(m, Object3D)]
-        if new_meshes:
-            self.remove(*new_meshes)  # type: ignore[arg-type]
-            self.meshes += new_meshes
-            mobjects = tuple(m for m in mobjects if not isinstance(m, Object3D))
-        if uses_opengl_mobjects():
-            self.remove(*mobjects)  # type: ignore[arg-type]
-            self.mobjects += mobjects  # type: ignore[arg-type]
-        else:
-            new_and_foreground_mobjects: list[Mobject] = [
-                *mobjects,  # type: ignore[list-item]
-                *self.foreground_mobjects,
-            ]
-            self.restructure_mobjects(to_remove=new_and_foreground_mobjects)
-            self.mobjects += new_and_foreground_mobjects
-            if self.moving_mobjects:
-                self.restructure_mobjects(
-                    to_remove=new_and_foreground_mobjects,
-                    mobject_list_name="moving_mobjects",
-                )
-                self.moving_mobjects += new_and_foreground_mobjects
+        new_and_foreground_mobjects: list[Mobject] = [
+            *mobjects,
+            *self.foreground_mobjects,
+        ]
+        self.restructure_mobjects(to_remove=new_and_foreground_mobjects)
+        self.mobjects += new_and_foreground_mobjects
+        if self.moving_mobjects:
+            self.restructure_mobjects(
+                to_remove=new_and_foreground_mobjects,
+                mobject_list_name="moving_mobjects",
+            )
+            self.moving_mobjects += new_and_foreground_mobjects
         return self
 
     def add_mobjects_from_animations(self, animations: list[Animation]) -> None:
@@ -621,7 +595,7 @@ class Scene:
             mob = animation.mobject
             if mob is not None and mob not in curr_mobjects:
                 self.add(mob)
-                curr_mobjects += mob.get_family()  # type: ignore[arg-type]
+                curr_mobjects += mob.get_family()
 
     def remove(self, *mobjects: Mobject) -> Self:
         """
@@ -634,18 +608,8 @@ class Scene:
         *mobjects
             The mobjects to remove.
         """
-        meshes_to_remove = {m for m in mobjects if isinstance(m, Object3D)}
-        if meshes_to_remove:
-            self.meshes = [m for m in self.meshes if m not in meshes_to_remove]
-            mobjects = tuple(m for m in mobjects if not isinstance(m, Object3D))
-        if uses_opengl_mobjects():
-            self.mobjects = restructure_list_to_exclude_certain_family_members(
-                self.mobjects,
-                list(mobjects),
-            )
-        else:
-            for list_name in "mobjects", "foreground_mobjects":
-                self.restructure_mobjects(mobjects, list_name, False)
+        for list_name in "mobjects", "foreground_mobjects":
+            self.restructure_mobjects(mobjects, list_name, False)
         return self
 
     def replace(self, old_mobject: Mobject, new_mobject: Mobject) -> None:
@@ -986,8 +950,8 @@ class Scene:
 
         def _collect_animation_mobjects(
             nested_animations: Iterable[Animation],
-        ) -> list[Mobject | OpenGLMobject]:
-            animation_mobjects: list[Mobject | OpenGLMobject] = []
+        ) -> list[Mobject]:
+            animation_mobjects: list[Mobject] = []
             for anim in nested_animations:
                 # Keep composition wrappers as conservative boundaries for the
                 # static frame cache, in addition to their nested animations.
@@ -1463,7 +1427,7 @@ class Scene:
         from IPython.terminal.embed import InteractiveShellEmbed
 
         def ipython(shell: InteractiveShellEmbed, namespace: dict[str, Any]) -> None:
-            import manim.opengl
+            import manim
 
             def load_module_into_namespace(
                 module: Any, namespace: dict[str, Any]
@@ -1472,7 +1436,6 @@ class Scene:
                     namespace[name] = getattr(module, name)
 
             load_module_into_namespace(manim, namespace)
-            load_module_into_namespace(manim.opengl, namespace)
 
             def embedded_rerun(*args: Any, **kwargs: Any) -> None:
                 self.queue.put(SceneInteractRerun("keyboard"))
@@ -1598,7 +1561,6 @@ class Scene:
                 last_time = time.time()
                 self._get_manager()._render_preview_frame(dt)
                 self.update_mobjects(dt)
-                self.update_meshes(dt)
                 self.update_self(dt)
 
         # Join the keyboard thread if necessary.
@@ -1742,7 +1704,6 @@ class Scene:
             alpha = t / animation.run_time if animation.run_time > 0 else 1.0
             animation.interpolate(alpha)
         self.update_mobjects(dt)
-        self.update_meshes(dt)
         self.update_self(dt)
 
     def add_subcaption(

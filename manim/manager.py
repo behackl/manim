@@ -12,7 +12,6 @@ from ._config.logger_utils import set_file_logger
 from ._run.listeners import (
     _Encoder,
     _FrameRequests,
-    _MeshGuard,
     _Preview,
     _Progress,
 )
@@ -523,8 +522,7 @@ class Manager(Generic[SceneT]):
             # Keep calls made before the run, e.g. a section in the constructor.
             record.entries = previous.entries
         record.start(capture_timeline)
-        meshes = _MeshGuard(self)
-        listeners: list[_RunListener] = [record, meshes, _Progress(self)]
+        listeners: list[_RunListener] = [record, _Progress(self)]
         if on_frame is not None:
             listeners.append(_FrameRequests(self, times, on_frame))
         self._run_loop = _RunLoop(
@@ -536,7 +534,6 @@ class Manager(Generic[SceneT]):
         self._evaluating = True
         try:
             with self.renderer._scene_images():
-                meshes.check()
                 self.setup()
                 ended_early = False
                 try:
@@ -544,7 +541,6 @@ class Manager(Generic[SceneT]):
                 except EndSceneEarlyException:
                     ended_early = True
                 self.tear_down()
-                meshes.check()
             self._run_loop.finish(ended_early=ended_early)
             if capture_timeline:
                 self._timeline = record.timeline()

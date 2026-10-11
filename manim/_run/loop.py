@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from ..animation.animation import Animation
     from ..manager import Manager
     from ..mobject.mobject import Mobject, _AnimationBuilder
-    from ..mobject.opengl.opengl_mobject import OpenGLMobject
     from ..scene.scene import Scene
     from ..typing import RGBAPixelArray
     from .selection import _OutputSelection
@@ -315,10 +314,10 @@ class _RunLoop:
         """
         if not self.manager.skip_animations or scene.stop_condition is not None:
             return False
-        if scene.updaters or scene.always_update_mobjects or scene.meshes:
+        if scene.updaters or scene.always_update_mobjects:
             return False
         assert scene.animations is not None
-        roots: list[Mobject | OpenGLMobject] = [*scene.mobjects]
+        roots: list[Mobject] = [*scene.mobjects]
         roots += [a.mobject for a in scene.animations if a.mobject is not None]
         return not any(
             mobject.get_updaters() for root in roots for mobject in root.get_family()

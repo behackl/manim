@@ -6,7 +6,6 @@ import pytest
 from manim import RED, RIGHT, Circle, Square, VMobject
 from manim.mobject import fields
 from manim.mobject.fields import Field, field_version
-from manim.mobject.types.point_cloud_mobject import PMobject
 from manim.utils.hashing import get_json
 
 
@@ -86,16 +85,6 @@ def test_plain_field_has_version_zero_until_assigned():
     holder.width = 2.0
     assert holder.width == 2.0
     assert field_version(holder, "width") != 0
-
-
-def test_point_cloud_colors_use_opengl_storage_when_rebased(using_opengl_renderer):
-    cloud = PMobject()
-    cloud.add_points([[0, 0, 0], [1, 0, 0]])
-
-    cloud.set_color(RED)
-
-    assert "rgbas" not in cloud.__dict__
-    assert cloud.rgbas is cloud.data["rgbas"]
 
 
 def test_animation_steps_that_change_nothing_keep_versions():

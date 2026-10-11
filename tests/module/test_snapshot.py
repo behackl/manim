@@ -30,7 +30,9 @@ def test_extract_skips_excluded_families_and_mobjects_without_drawing():
         excluded_mobjects=[excluded],
     )
 
-    assert [node.source for node in nodes] == [square, circle, cloud, image]
+    assert [node.uid for node in nodes] == [
+        m.uid for m in (square, circle, cloud, image)
+    ]
     assert [type(node.payload) for node in nodes] == [RPath, RPath, RPoints, RImage]
     assert len({node.uid for node in nodes}) == 4
 

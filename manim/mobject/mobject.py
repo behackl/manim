@@ -44,6 +44,7 @@ from ..utils.iterables import (
 from ..utils.paths import straight_path
 from ..utils.simple_functions import clip
 from ..utils.space_ops import angle_between_vectors, normalize, rotation_matrix
+from .fields import ArrayField
 
 if TYPE_CHECKING:
     from typing import Self, TypeAlias
@@ -86,13 +87,17 @@ class Mobject:
     submobjects : List[:class:`Mobject`]
         The contained objects.
     points : :class:`numpy.ndarray`
-        The points of the objects.
+        The points of the objects. To change them, assign a new array; modifying
+        the array in place is deprecated.
 
         .. seealso::
 
             :class:`~.VMobject`
 
     """
+
+    points: ArrayField[Point3D_Array] = ArrayField(np.float64)
+    _hash_excluded_attributes = frozenset({"_field_versions", "_field_checksums"})
 
     original_id: str
     _original__init__: Callable[..., None]
@@ -450,8 +455,16 @@ class Mobject:
         cls = self.__class__
         result = cls.__new__(cls)
         clone_from_id[id(self)] = result
+        attributes = result.__dict__
         for k, v in self.__dict__.items():
-            setattr(result, k, copy.deepcopy(v, clone_from_id))
+            # Read-only arrays (field values in strict mode) cannot change, so the
+            # copy shares them. Writing to __dict__ directly keeps field versions.
+            if type(v) is np.ndarray and not v.flags.writeable:
+                attributes[k] = v
+            elif k == "_field_versions":
+                attributes[k] = v.copy()
+            else:
+                attributes[k] = copy.deepcopy(v, clone_from_id)
         result.original_id = str(id(self))
         return result
 

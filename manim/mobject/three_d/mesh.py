@@ -59,6 +59,11 @@ class MeshMobject(Mobject):
     uvs
         Texture coordinates of the vertices, shape ``(n, 2)``, from ``(0, 0)`` at the
         upper left of the image to ``(1, 1)`` at the lower right.
+    shade_in_3d
+        Shade each face as a :class:`.ThreeDCamera` shades 3D paths (see
+        :meth:`.VMobject.set_shade_in_3d`), instead of with ``gloss`` and ``shadow``.
+    stroke_color, stroke_width, stroke_opacity
+        The outlines of the faces (see :attr:`faces`); no outlines by default.
     """
 
     triangles: ArrayField[np.ndarray] = ArrayField(np.int32)
@@ -66,9 +71,15 @@ class MeshMobject(Mobject):
     rgbas: ArrayField[np.ndarray] = ArrayField(np.float64)
     uvs: ArrayField[np.ndarray] = ArrayField(np.float64)
     texture: ArrayField[np.ndarray] = ArrayField(np.uint8)
+    #: Polygons, as vertex indices in order around each, that the mesh is made of
+    #: (quads for parametric surfaces). Empty means the triangles.
+    faces: ArrayField[np.ndarray] = ArrayField(np.int32)
     gloss: Field[float] = Field()
     shadow: Field[float] = Field()
     depth_test: Field[bool] = Field()
+    shade_in_3d: Field[bool] = Field()
+    stroke_rgbas: ArrayField[np.ndarray] = ArrayField(np.float64)
+    stroke_width: Field[float] = Field()
 
     def __init__(
         self,
@@ -81,9 +92,17 @@ class MeshMobject(Mobject):
         depth_test: bool = True,
         texture: str | Path | np.ndarray | None = None,
         uvs: np.ndarray | None = None,
+        shade_in_3d: bool = False,
+        stroke_color: ParsableManimColor = LIGHT_GREY,
+        stroke_width: float = 0,
+        stroke_opacity: float = 1.0,
         **kwargs: Any,
     ) -> None:
         self.triangles = np.zeros((0, 3)) if triangles is None else triangles
+        self.faces = np.zeros((0, 3))
+        self.shade_in_3d = shade_in_3d
+        self.stroke_rgbas = [color_to_rgba(stroke_color, stroke_opacity)]
+        self.stroke_width = stroke_width
         self.rgbas = [color_to_rgba(color, opacity)]
         self.uvs = np.zeros((0, 2)) if uvs is None else uvs
         self.texture = _load_texture(texture)
@@ -118,6 +137,29 @@ class MeshMobject(Mobject):
         rgbas[:, 3] *= 1 - darkness
         self.rgbas = rgbas
         return super().fade(darkness, family)
+
+    def set_stroke(
+        self,
+        color: ParsableManimColor | None = None,
+        width: float | None = None,
+        opacity: float | None = None,
+        family: bool = True,
+    ) -> Self:
+        """Set the outlines of the faces."""
+        rgba = self.stroke_rgbas[0]
+        self.stroke_rgbas = [
+            color_to_rgba(
+                ManimColor(rgba[:3]) if color is None else color,
+                rgba[3] if opacity is None else opacity,
+            )
+        ]
+        if width is not None:
+            self.stroke_width = width
+        return self
+
+    def get_faces(self) -> np.ndarray:
+        """The polygons of the mesh: :attr:`faces`, or else the triangles."""
+        return self.faces if len(self.faces) else self.triangles
 
     def set_vertex_colors(self, rgbas: np.ndarray) -> Self:
         """Give every vertex its own colour, as an ``(n, 4)`` array of RGBA values."""
@@ -171,14 +213,26 @@ class MeshMobject(Mobject):
         self.rgbas = (1 - alpha) * start + alpha * end
         self.gloss = (1 - alpha) * mobject1.gloss + alpha * mobject2.gloss
         self.shadow = (1 - alpha) * mobject1.shadow + alpha * mobject2.shadow
+        self.stroke_rgbas = (
+            1 - alpha
+        ) * mobject1.stroke_rgbas + alpha * mobject2.stroke_rgbas
+        self.stroke_width = (
+            1 - alpha
+        ) * mobject1.stroke_width + alpha * mobject2.stroke_width
         return self
 
     def pointwise_become_partial(self, mobject: Mobject, a: float, b: float) -> Self:
         """Show the triangles of ``mobject`` from proportion ``a`` to ``b``, in order."""
         assert isinstance(mobject, MeshMobject)
         count = len(mobject.triangles)
+        low, high = int(a * count), int(np.ceil(b * count))
         self.points = mobject.points
-        self.triangles = mobject.triangles[int(a * count) : int(np.ceil(b * count))]
+        self.triangles = mobject.triangles[low:high]
+        faces = mobject.faces
+        if len(faces):
+            # Faces made of triangles in order, the same number each.
+            per_face = count // len(faces)
+            self.faces = faces[low // per_face : -(-high // per_face)]
         return self
 
     # Shape
@@ -232,7 +286,7 @@ class ParametricSurface(MeshMobject):
         flat: bool = False,
         **kwargs: Any,
     ) -> None:
-        self.func = func
+        self._func = func
         self.u_range = tuple(u_range)
         self.v_range = tuple(v_range)
         self.resolution = (
@@ -242,6 +296,10 @@ class ParametricSurface(MeshMobject):
         )
         self.flat = flat
         super().__init__(**kwargs)
+
+    def func(self, u: float, v: float) -> Point3D:
+        """The point at parameters ``(u, v)``."""
+        return self._func(u, v)
 
     def generate_points(self) -> Self:
         nu, nv = self.resolution
@@ -263,17 +321,18 @@ class ParametricSurface(MeshMobject):
             triangles = np.concatenate(
                 (base + [0, 1, 2], base + [1, 3, 2]), axis=1
             ).reshape(-1, 3)
+            faces = base + [0, 1, 3, 2]
         else:
             points = grid.reshape(-1, 3)
             params = uv.reshape(-1, 2)
             index = np.arange((nu + 1) * (nv + 1)).reshape(nu + 1, nv + 1)
             a, b = index[:-1, :-1].ravel(), index[1:, :-1].ravel()
             c, d = index[:-1, 1:].ravel(), index[1:, 1:].ravel()
-            triangles = np.concatenate(
-                (np.stack((a, b, c), axis=1), np.stack((b, d, c), axis=1))
-            )
+            triangles = np.stack((a, b, c, b, d, c), axis=1).reshape(-1, 3)
+            faces = np.stack((a, b, d, c), axis=1)
         self.points = points
         self.triangles = triangles
+        self.faces = faces
         if len(self.texture):
             u0, u1 = self.u_range
             v0, v1 = self.v_range
@@ -347,6 +406,7 @@ class ParametricSurface(MeshMobject):
                 grid[:, index + 1 :] = edge[:, None]
         self.points = grid.reshape(-1, 3)
         self.triangles = mobject.triangles
+        self.faces = mobject.faces
         return self
 
     def get_wireframe(

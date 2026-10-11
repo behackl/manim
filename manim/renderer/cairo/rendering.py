@@ -28,7 +28,8 @@ from manim.renderer.snapshot import (
 )
 from manim.utils.space_ops import cross2d
 
-from .target import _CairoRenderTarget
+from .camera import Camera
+from .target import _CairoRenderTarget, _PathCache
 
 if TYPE_CHECKING:
     from manim.typing import (
@@ -38,7 +39,6 @@ if TYPE_CHECKING:
         RGBAPixelArray,
     )
 
-    from .camera import Camera
 
 _LINE_JOIN_MAP = {
     LineJointType.AUTO: cairo.LineJoin.MITER,  # cairo default; TODO: this could be improved
@@ -71,6 +71,7 @@ class _CairoDrawingContext:
         self.camera = camera
         self.target = target
         self.image_resolver = image_resolver
+        self._path_cache: _PathCache | None = None
 
     def draw(
         self,
@@ -81,6 +82,15 @@ class _CairoDrawingContext:
     ) -> None:
         self.target._ensure_open()
         self.camera._prepare_for_render()
+        # Paths can be cached only if the camera draws points where they are.
+        self._path_cache = (
+            self.target.path_cache
+            if type(self.camera).transform_points_pre_display
+            is Camera.transform_points_pre_display
+            else None
+        )
+        if self._path_cache is not None:
+            self._path_cache.next_generation()
         nodes = self.camera._sort_for_display(
             extract(
                 mobjects,
@@ -117,14 +127,32 @@ class _CairoDrawingContext:
 
     def _set_cairo_context_path(self, context: cairo.Context, node: RNode) -> None:
         path: RPath = node.payload  # type: ignore[assignment]
+        cache = self._path_cache
+        if cache is not None:
+            version = node.versions.get("points", 0)
+            matrix = context.get_matrix()
+            view = (matrix.xx, matrix.yy, matrix.x0, matrix.y0)
+            cached = cache.get(node.uid, version, path.tolerance, view)
+            if cached is not None:
+                context.new_path()
+                context.append_path(cached)
+                return
+        built = self._build_cairo_context_path(context, node, path)
+        if cache is not None and built:
+            cache.put(node.uid, version, path.tolerance, view, context.copy_path())
+
+    def _build_cairo_context_path(
+        self, context: cairo.Context, node: RNode, path: RPath
+    ) -> bool:
+        """Set the context's path to the node's path; return whether it did."""
         points = self.camera.transform_points_pre_display(node.source, path.points)
         if len(points) == 0:
-            return
+            return False
 
         nppcc = 4
         split_indices = _subpath_split_indices(points, path.tolerance, n_dims=2)
         if len(split_indices) == 0:
-            return
+            return False
 
         points_xy = points[:, :2].ravel()
         context.new_path()
@@ -162,6 +190,7 @@ class _CairoDrawingContext:
                 path.tolerance,
             ):
                 close_path()
+        return True
 
     def _set_cairo_context_color(
         self,

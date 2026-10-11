@@ -13,7 +13,7 @@ in vec2 v_uv;
 
 out vec4 frag_color;
 
-#include ../include/finalize_color.glsl
+#include ../include/add_light.glsl
 
 void main(){
     vec4 color = v_color;

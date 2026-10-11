@@ -71,7 +71,7 @@ def _sphere(radius=2, **kwargs):
     )
 
 
-def test_texture_is_drawn_like_an_image(opengl_common_mobjects):
+def test_texture_is_drawn_like_an_image(using_opengl_renderer):
     # u runs left to right across the image, v from its bottom to its top.
     texture = np.zeros((40, 60, 4), dtype=np.uint8)
     texture[..., 0] = np.linspace(0, 255, 60)[None, :]
@@ -89,7 +89,7 @@ def test_texture_is_drawn_like_an_image(opengl_common_mobjects):
     assert np.abs(surface - image).mean() < 0.01
 
 
-def test_opaque_meshes_hide_what_is_behind_them(opengl_common_mobjects):
+def test_opaque_meshes_hide_what_is_behind_them(using_opengl_renderer):
     front = _plane(1, PURE_RED)
     back = _plane(-1, PURE_BLUE)
 
@@ -98,7 +98,7 @@ def test_opaque_meshes_hide_what_is_behind_them(opengl_common_mobjects):
     np.testing.assert_allclose(_pixel(pixels, 0, 0), [1, 0, 0])
 
 
-def test_translucent_meshes_show_only_their_front_layer(opengl_common_mobjects):
+def test_translucent_meshes_show_only_their_front_layer(using_opengl_renderer):
     sphere = _sphere(opacity=0.5, gloss=0, shadow=0)
     top = sphere.points[:, 2] > 0
     rgbas = np.zeros((len(top), 4))
@@ -110,7 +110,7 @@ def test_translucent_meshes_show_only_their_front_layer(opengl_common_mobjects):
     np.testing.assert_allclose(_pixel(pixels, 0.5, 0.5), [0.5, 0, 0], atol=0.01)
 
 
-def test_meshes_are_lit_from_the_light_source(opengl_common_mobjects):
+def test_meshes_are_lit_from_the_light_source(using_opengl_renderer):
     pixels, camera = _image(
         "opengl",
         lambda: [_sphere(gloss=0, shadow=1)],
@@ -127,7 +127,7 @@ def test_meshes_are_lit_from_the_light_source(opengl_common_mobjects):
     assert lit.sum() > 2 * unlit.sum()
 
 
-def test_meshes_fixed_in_frame_ignore_the_camera(opengl_common_mobjects):
+def test_meshes_fixed_in_frame_ignore_the_camera(using_opengl_renderer):
     plane = _plane(0, PURE_RED).fix_in_frame()
 
     pixels, _ = _image("opengl", lambda: [plane], ThreeDScene, phi=80 * DEGREES)

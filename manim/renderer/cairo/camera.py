@@ -22,6 +22,7 @@ from manim.mobject.three_d.three_d_utils import (
     _unit_normal,
 )
 from manim.mobject.types.image_mobject import ImageMobjectFromCamera
+from manim.mobject.types.point_cloud_mobject import Point
 from manim.mobject.types.vectorized_mobject import VMobject
 from manim.mobject.value_tracker import ValueTracker
 from manim.utils.color import WHITE, ManimColor, ParsableManimColor, get_shaded_rgb
@@ -41,14 +42,10 @@ if TYPE_CHECKING:
 
 
 class _CameraFrame(ScreenRectangle):
-    """Frame whose center is computed directly from its boundary points.
-
-    Under the OpenGL renderer, ``ConvertToOpenGL`` makes this an OpenGL mobject like
-    the scene's other mobjects; the shortcuts below then step aside.
-    """
+    """Frame whose center is computed directly from its boundary points."""
 
     def get_points_defining_boundary(self) -> Point3D_Array:
-        if self.submobjects or len(self.points) <= 1 or not isinstance(self, VMobject):
+        if self.submobjects or len(self.points) <= 1:
             return super().get_points_defining_boundary()
         # Use VMobject's boundary anchors directly for a frame without submobjects.
         # These also give the bounds when the frame has been deformed.
@@ -58,8 +55,6 @@ class _CameraFrame(ScreenRectangle):
         return curves[:, [0, -1], :].reshape(-1, self.points.shape[1])
 
     def get_center(self) -> Point3D:
-        if not isinstance(self, VMobject):
-            return super().get_center()
         points = self.get_points_defining_boundary()
         if len(points) == 0:
             return np.zeros(self.dim)
@@ -441,10 +436,7 @@ class ThreeDCamera(Camera):
         self.shading_factor = shading_factor
         self.default_distance = default_distance
         self.light_source_start_point = light_source_start_point
-        # A plain mobject, which ConvertToOpenGL leaves alone, so that both renderers
-        # read the same light source.
-        self.light_source = Mobject()
-        self.light_source.points = [self.light_source_start_point]
+        self.light_source = Point(self.light_source_start_point)
         self.should_apply_shading = should_apply_shading
         self.exponential_projection = exponential_projection
         self.phi_tracker = ValueTracker(self.phi)

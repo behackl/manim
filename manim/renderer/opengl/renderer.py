@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import itertools as it
 import threading
 import time
 import typing
@@ -14,11 +13,6 @@ from moderngl import Framebuffer
 from PIL import Image
 
 from manim import config, logger
-from manim.mobject.opengl.opengl_compatibility import uses_opengl_mobjects
-from manim.mobject.opengl.opengl_mobject import (
-    OpenGLMobject,
-)
-from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVMobject
 from manim.renderer.snapshot import extract
 from manim.typing import Point3D
 from manim.utils.color import color_to_rgba
@@ -31,11 +25,7 @@ from .._execution import _RendererExecutionView
 from ..cairo.camera import Camera, MultiCamera, ThreeDCamera
 from ..protocol import RendererCapabilities
 from .drawing import DrawTarget, SnapshotDrawing
-from .shader import Mesh, Shader, shader_program_cache
-from .vectorized_mobject_rendering import (
-    render_opengl_vectorized_mobject_fill,
-    render_opengl_vectorized_mobject_stroke,
-)
+from .shader import shader_program_cache
 from .window_settings import _WindowSettings
 
 if TYPE_CHECKING:
@@ -79,8 +69,6 @@ class OpenGLRenderer(_RendererExecutionView):
         The camera used for rendering: the same camera classes as the Cairo renderer.
     num_plays : float
         The number of animation plays executed.
-    path_to_texture_id : dict[str, int]
-        Mapping from texture file paths to OpenGL texture IDs.
     pressed_keys : set[int]
         Set of currently pressed key codes.
     skip_animations : bool
@@ -135,7 +123,6 @@ class OpenGLRenderer(_RendererExecutionView):
         self._camera_view_targets: dict[int, _ViewTarget] = {}
         self.pressed_keys: set[int] = set()
         self.window: Window | None = None
-        self.path_to_texture_id: dict[str, int] = {}
         self.background_color = config["background_color"]
         self._context: moderngl.Context | None = None
         self._frame_buffer_object: Framebuffer | None = None
@@ -144,7 +131,6 @@ class OpenGLRenderer(_RendererExecutionView):
         self._closed = False
         self._retiring = False
         self._resources = contextlib.ExitStack()
-        self._textures: list[moderngl.Texture] = []
         self._previous_renderer: weakref.ReferenceType[OpenGLRenderer] | None = None
 
     def init_scene(
@@ -335,16 +321,11 @@ class OpenGLRenderer(_RendererExecutionView):
                 if host_alive:
                     release(program.release)
         if host_alive:
-            for texture in reversed(self._textures):
-                release(texture.release)
-        self._textures.clear()
-        if host_alive:
             release(self._resources.close)
         else:
             self._resources.pop_all()
             if self.window is not None and self.window._window.context is not None:
                 release(self.window.close)
-        self.path_to_texture_id.clear()
         self.pressed_keys.clear()
         self._resources = contextlib.ExitStack()
         host_still_alive = (
@@ -522,146 +503,6 @@ class OpenGLRenderer(_RendererExecutionView):
             self._camera_view_targets.pop(uid).release()
         return textures
 
-    def render_mobject(self, mobject: OpenGLMobject | OpenGLVMobject) -> None:
-        """
-        Render an OpenGL mobject (either OpenGLMobject or OpenGLVMobject)
-        using the appropriate shaders and rendering pipeline.
-
-        Parameters
-        ----------
-        mobject : OpenGLMobject | OpenGLVMobject
-            The mobject to render. Must be an instance of OpenGLMobject or OpenGLVMobject.
-
-        Raises
-        ------
-        TypeError
-            If a shader texture is not a moderngl.Uniform or moderngl.UniformBlock.
-        """
-        self.open()
-        if isinstance(mobject, OpenGLVMobject):
-            if config["use_projection_fill_shaders"]:
-                render_opengl_vectorized_mobject_fill(self, mobject)
-
-            if config["use_projection_stroke_shaders"]:
-                render_opengl_vectorized_mobject_stroke(self, mobject)
-
-        shader_wrapper_list = mobject.get_shader_wrapper_list()
-        # Convert ShaderWrappers to Meshes.
-        for shader_wrapper in shader_wrapper_list:
-            folder = shader_wrapper.shader_folder
-            shader = Shader(
-                context=self.context, name=str(folder) if folder is not None else None
-            )
-
-            # Set textures.
-            for name, path in shader_wrapper.texture_paths.items():
-                tid = self.get_texture_id(str(path))
-                shader_texture = shader.shader_program[name]
-                if not isinstance(
-                    shader_texture, (moderngl.Uniform, moderngl.UniformBlock)
-                ):
-                    msg = (
-                        f"Shader texture must be a uniform, got {type(shader_texture)}"
-                    )
-                    raise TypeError(msg)
-                shader_texture.value = tid
-
-            # Set uniforms.
-            for name, value in it.chain(
-                shader_wrapper.uniforms.items(),
-                self.perspective_uniforms.items(),
-            ):
-                with contextlib.suppress(KeyError):
-                    shader.set_uniform(name, value)
-            try:
-                shader.set_uniform("u_view_matrix", self.view_matrix)
-                shader.set_uniform("u_projection_matrix", self.projection_matrix)
-            except KeyError:
-                pass
-
-            # Set depth test.
-            if shader_wrapper.depth_test:
-                self.context.enable(moderngl.DEPTH_TEST)
-            else:
-                self.context.disable(moderngl.DEPTH_TEST)
-
-            # Render.
-            vert_indices = shader_wrapper.vert_indices
-            mesh = Mesh(
-                shader,
-                shader_wrapper.vert_data,
-                indices=np.asarray(vert_indices) if vert_indices is not None else None,
-                use_depth_test=shader_wrapper.depth_test,
-                primitive=mobject.render_primitive,
-            )
-            mesh.set_uniforms(self)
-            mesh.render()
-
-    def get_texture_id(self, path: str) -> int:
-        """
-        Retrieves the OpenGL texture ID associated with the given image file path.
-
-        Automatically creates a new texture it it has not been loaded before.
-
-        Parameters
-        ----------
-        path : str
-            The file path to the texture image.
-
-        Returns
-        -------
-        int
-            The OpenGL texture ID corresponding to the given path.
-        """
-        self._ensure_not_closed()
-        return (
-            self.path_to_texture_id[path]
-            if path in self.path_to_texture_id
-            else self._create_texture(path)
-        )
-
-    def _create_texture(self, image_path: str) -> int:
-        """
-        Create an OpenGL texture from the given image file path, get its texture ID,
-        and store it in `self.path_to_texture_id[image_path]`.
-
-        Parameters
-        ----------
-        image_path : str
-            The file path to the image to be loaded as a texture.
-
-        Returns
-        -------
-        int
-            The texture ID assigned to the newly created texture.
-        """
-        with Image.open(image_path) as img:
-            tid = len(self.path_to_texture_id)
-
-            # grayscale image
-            if img.mode == "L":
-                components = 1
-                swizzle = "RRR1"
-            else:
-                # convert everything to RGBA for consistency
-                img = img.convert("RGBA")
-                components = 4
-                swizzle = "RGBA"
-
-            texture = self.context.texture(
-                size=img.size,
-                components=components,
-                data=img.tobytes(),
-            )
-        texture.repeat_x = False
-        texture.repeat_y = False
-        texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
-        texture.swizzle = swizzle
-        texture.use(location=tid)
-        self._textures.append(texture)
-        self.path_to_texture_id[image_path] = tid
-        return tid
-
     def update_skipping_status(self) -> None:
         """Ask the scene's manager whether this play should be fast-forwarded.
 
@@ -767,7 +608,7 @@ class OpenGLRenderer(_RendererExecutionView):
         Performs the following steps:
         1. Clear the frame buffer with the background color.
         2. Refresh camera perspective uniforms for rendering.
-        3. Iterate through all mobjects in the scene, rendering those marked for display.
+        3. Draw render snapshots of the scene's mobjects.
         4. Iterate through all mesh objects in the scene, setting their uniforms and rendering them.
         5. Update the wall-clock time used to pace the preview window.
 
@@ -785,24 +626,7 @@ class OpenGLRenderer(_RendererExecutionView):
 
         self.refresh_perspective_uniforms(self.camera)
 
-        if not uses_opengl_mobjects():
-            self._draw_snapshots(scene)
-            for obj in scene.meshes:
-                for mesh in obj.get_meshes():
-                    mesh.set_uniforms(self)
-                    mesh.render()
-            return
-
-        for mobject in scene.mobjects:
-            # Mobjects of the common classes are not drawn by this renderer yet.
-            if not isinstance(mobject, OpenGLMobject) or not mobject.should_render:
-                continue
-
-            # TODO: make the type of 'mobject' generic in the 'Scene' class
-            # to avoid the cast here
-            mobj = typing.cast("OpenGLMobject | OpenGLVMobject", mobject)
-            self.render_mobject(mobj)
-
+        self._draw_snapshots(scene)
         for obj in scene.meshes:
             for mesh in obj.get_meshes():
                 mesh.set_uniforms(self)

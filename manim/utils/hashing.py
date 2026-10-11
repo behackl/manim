@@ -97,16 +97,6 @@ _derived_attribute_cache: weakref.WeakKeyDictionary[type, frozenset[str]] = (
 )
 
 
-def invalidate_derived_attribute_names() -> None:
-    """Discard collected names after any class has been rebased.
-
-    Called by :meth:`ManimConfig.renderer` after ``ConvertToOpenGL`` swaps base classes,
-    which changes what :func:`_derived_attribute_names` would collect for classes that
-    are not themselves rebased but inherit from one that is.
-    """
-    _derived_attribute_cache.clear()
-
-
 def _derived_attribute_names(klass: type) -> frozenset[str]:
     """Return attribute names on a class that must not contribute to a cache key.
 
@@ -122,9 +112,7 @@ def _derived_attribute_names(klass: type) -> frozenset[str]:
     - every name a class lists in ``_hash_excluded_attributes``, for caches that are
       managed by hand with an explicit dirty flag.
 
-    The result is memoized until :func:`invalidate_derived_attribute_names` clears it,
-    which the renderer setter does because ``ConvertToOpenGL`` rebases already created
-    classes when ``config.renderer`` changes.
+    The result is memoized per class.
     """
     cached = _derived_attribute_cache.get(klass)
     if cached is not None:

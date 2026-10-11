@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
     from manim.renderer.snapshot import RNode, RPath
 
-    from .drawing import _Geometry
+    from .drawing import DrawTarget, _Geometry
     from .renderer import OpenGLRenderer
 
 __all__ = ["WindingFill"]
@@ -142,6 +142,7 @@ class WindingFill:
         self,
         nodes: Sequence[RNode],
         geometry: Sequence[_Geometry],
+        target: DrawTarget,
         scissor: tuple[int, int, int, int] | None = None,
     ) -> None:
         """Accumulate one group's coverage and colour it into the frame.
@@ -149,7 +150,7 @@ class WindingFill:
         ``scissor`` limits clearing and resolving to a pixel rectangle
         ``(x, y, width, height)`` that contains the group.
         """
-        camera = self._renderer.camera
+        camera = target.camera
         filled, colours = [], []
         for node, geo in zip(nodes, geometry, strict=True):
             path: RPath = node.payload  # type: ignore[assignment]
@@ -161,18 +162,15 @@ class WindingFill:
             return
         vertices = pack(filled, colours)
         renderer = self._renderer
-        pixel_shape = renderer.get_pixel_shape()
-        if pixel_shape is None:
-            return
         context = renderer.context
-        self._ensure_buffers(pixel_shape)
+        self._ensure_buffers(target.size)
         assert self._accumulation is not None
         assert self._accumulation_texture is not None
         assert self._opacity_texture is not None
         assert self._resolve_array is not None
 
         shader = Shader(context, name="winding_fill")
-        for name, value in renderer.perspective_uniforms.items():
+        for name, value in target.uniforms.items():
             shader.set_uniform(name, value)
         for name in ("is_fixed_in_frame", "is_fixed_orientation"):
             shader.set_uniform(name, 0.0)
@@ -194,7 +192,7 @@ class WindingFill:
                 context.blend_func = (moderngl.ONE, moderngl.ONE)
                 array.render(moderngl.TRIANGLES)
 
-                frame = renderer.frame_buffer_object
+                frame = target.framebuffer
                 frame.use()
                 frame.scissor = scissor
                 context.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)

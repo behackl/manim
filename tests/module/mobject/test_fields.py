@@ -3,9 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from manim import RIGHT, Square
+from manim import RED, RIGHT, Square
 from manim.mobject import fields
-from manim.mobject.fields import field_version
+from manim.mobject.fields import Field, field_version
+from manim.mobject.types.point_cloud_mobject import PMobject
 from manim.utils.hashing import get_json
 
 
@@ -73,3 +74,25 @@ def test_versions_do_not_change_play_cache_keys():
 
     assert field_version(reassigned, "points") != field_version(square, "points")
     assert get_json(reassigned) == get_json(square)
+
+
+def test_plain_field_has_version_zero_until_assigned():
+    class Holder:
+        width = Field()
+
+    holder = Holder()
+    assert field_version(holder, "width") == 0
+
+    holder.width = 2.0
+    assert holder.width == 2.0
+    assert field_version(holder, "width") != 0
+
+
+def test_point_cloud_colors_use_opengl_storage_when_rebased(using_opengl_renderer):
+    cloud = PMobject()
+    cloud.add_points([[0, 0, 0], [1, 0, 0]])
+
+    cloud.set_color(RED)
+
+    assert "rgbas" not in cloud.__dict__
+    assert cloud.rgbas is cloud.data["rgbas"]

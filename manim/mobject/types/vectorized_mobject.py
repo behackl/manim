@@ -79,6 +79,60 @@ if TYPE_CHECKING:
 #   That's kind of weird.
 
 
+def _points_equal_2d(p0: Point2DLike, p1: Point2DLike, tolerance: float) -> bool:
+    """See :meth:`VMobject.consider_points_equals_2d`."""
+    rtol = 1.0e-5  # default from np.isclose()
+    atol = tolerance
+
+    x0, y0 = p0[0], p0[1]
+    x1, y1 = p1[0], p1[1]
+    if x0 != x1:
+        x_diff = abs(x0 - x1)
+        if not (x_diff <= atol + rtol * abs(x1) and math.isfinite(x_diff)):
+            return False
+    if y0 == y1:
+        return True
+    y_diff = abs(y0 - y1)
+    return bool(y_diff <= atol + rtol * abs(y1) and math.isfinite(y_diff))
+
+
+def _subpath_split_indices(
+    points: CubicBezierPathLike, tolerance: float, n_dims: int = 3, nppcc: int = 4
+) -> npt.NDArray[np.int_]:
+    """See :meth:`VMobject.get_subpath_split_indices_from_points`."""
+    points = np.asarray(points)
+    n_pts = len(points)
+    if n_pts < nppcc:
+        return np.empty((0, 2), dtype=int)
+
+    # Point indices where each new cubic curve starts.
+    boundary_indices = np.arange(nppcc, n_pts, nppcc)
+    if len(boundary_indices) == 0:
+        # A single cubic curve: no internal boundaries to split on.
+        return np.array([[0, n_pts]])
+
+    # A boundary is a split where the previous curve's end anchor is not
+    # close to the next curve's start anchor. This is an allocation-light
+    # vectorization of np.isclose semantics: NaN is never close, while
+    # infinities compare equal only when they have the same sign.
+    rtol = 1.0e-5  # default from np.isclose()
+    atol = tolerance
+    ends = points[boundary_indices - 1, :n_dims]  # end of previous curve
+    starts = points[boundary_indices, :n_dims]  # start of next curve
+    with np.errstate(invalid="ignore"):
+        diffs = np.abs(ends - starts)
+        thresholds = atol + rtol * np.abs(starts)
+        is_close = diffs <= thresholds
+        finite_diffs = np.isfinite(diffs)
+        if not finite_diffs.all():
+            is_close &= finite_diffs
+            is_close |= ends == starts
+    is_split = ~np.all(is_close, axis=1)
+
+    split_points = np.concatenate([[0], boundary_indices[is_split], [n_pts]])
+    return np.stack([split_points[:-1], split_points[1:]], axis=1)
+
+
 class VMobject(Mobject):
     """A vectorized mobject.
 
@@ -1302,19 +1356,7 @@ class VMobject(Mobject):
         bool
             whether two points considered close.
         """
-        rtol = 1.0e-5  # default from np.isclose()
-        atol = self.tolerance_for_point_equality
-
-        x0, y0 = p0[0], p0[1]
-        x1, y1 = p1[0], p1[1]
-        if x0 != x1:
-            x_diff = abs(x0 - x1)
-            if not (x_diff <= atol + rtol * abs(x1) and math.isfinite(x_diff)):
-                return False
-        if y0 == y1:
-            return True
-        y_diff = abs(y0 - y1)
-        return bool(y_diff <= atol + rtol * abs(y1) and math.isfinite(y_diff))
+        return _points_equal_2d(p0, p1, self.tolerance_for_point_equality)
 
     # Information about line
     def get_cubic_bezier_tuples_from_points(
@@ -1427,38 +1469,12 @@ class VMobject(Mobject):
             A ``(n_subpaths, 2)`` int array whose rows are the ``[start, end]``
             point index ranges (end-exclusive) of each subpath.
         """
-        points = np.asarray(points)
-        nppcc = self.n_points_per_cubic_curve
-        n_pts = len(points)
-        if n_pts < nppcc:
-            return np.empty((0, 2), dtype=int)
-
-        # Point indices where each new cubic curve starts.
-        boundary_indices = np.arange(nppcc, n_pts, nppcc)
-        if len(boundary_indices) == 0:
-            # A single cubic curve: no internal boundaries to split on.
-            return np.array([[0, n_pts]])
-
-        # A boundary is a split where the previous curve's end anchor is not
-        # close to the next curve's start anchor. This is an allocation-light
-        # vectorization of np.isclose semantics: NaN is never close, while
-        # infinities compare equal only when they have the same sign.
-        rtol = 1.0e-5  # default from np.isclose()
-        atol = self.tolerance_for_point_equality
-        ends = points[boundary_indices - 1, :n_dims]  # end of previous curve
-        starts = points[boundary_indices, :n_dims]  # start of next curve
-        with np.errstate(invalid="ignore"):
-            diffs = np.abs(ends - starts)
-            thresholds = atol + rtol * np.abs(starts)
-            is_close = diffs <= thresholds
-            finite_diffs = np.isfinite(diffs)
-            if not finite_diffs.all():
-                is_close &= finite_diffs
-                is_close |= ends == starts
-        is_split = ~np.all(is_close, axis=1)
-
-        split_points = np.concatenate([[0], boundary_indices[is_split], [n_pts]])
-        return np.stack([split_points[:-1], split_points[1:]], axis=1)
+        return _subpath_split_indices(
+            points,
+            self.tolerance_for_point_equality,
+            n_dims=n_dims,
+            nppcc=self.n_points_per_cubic_curve,
+        )
 
     def get_subpaths(self) -> list[CubicSpline]:
         """Returns subpaths formed by the curves of the VMobject.

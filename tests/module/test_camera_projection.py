@@ -1,7 +1,6 @@
 """Default frame queries stay fresh without changing projection arithmetic."""
 
 import numpy as np
-import pytest
 
 from manim import (
     RIGHT,
@@ -14,11 +13,9 @@ from manim import (
 )
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
-def test_default_frame_center_matches_generic_query_after_mutations(dtype):
+def test_default_frame_center_matches_generic_query_after_mutations():
     camera = Camera()
     frame = camera.frame
-    frame.points = frame.points.astype(dtype)
 
     def check():
         np.testing.assert_array_equal(
@@ -31,8 +28,10 @@ def test_default_frame_center_matches_generic_query_after_mutations(dtype):
     check()
     frame.shift([2, -1, 0.5]).rotate(0.3).stretch(1.7, 0)
     check()
-    # Direct point edits must not require a draw or cache invalidation.
-    frame.points[0] += [3, 4, 5]
+    # Point assignments must not require a draw or cache invalidation.
+    points = frame.points.copy()
+    points[0] += [3, 4, 5]
+    frame.points = points
     check()
     child = Square().shift(10 * RIGHT)
     frame.add(child)

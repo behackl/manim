@@ -13,12 +13,12 @@ from manim import (
     PURE_RED,
     RIGHT,
     TAU,
-    config,
     ImageMobject,
     ParametricSurface,
     Scene,
-    tempconfig,
     ThreeDScene,
+    config,
+    tempconfig,
 )
 
 WIDTH, HEIGHT = 384, 216
@@ -165,3 +165,28 @@ def test_meshes_fixed_in_frame_ignore_the_camera(renderer):
     pixels, _ = _image(renderer, lambda: [plane], ThreeDScene, phi=80 * DEGREES)
 
     np.testing.assert_allclose(_pixel(pixels, 2.5, 1.5), [1, 0, 0])
+
+
+def test_shaded_faces_and_outlines_look_alike_on_both_renderers(using_opengl_renderer):
+    def surface():
+        sphere = _sphere(
+            2,
+            shade_in_3d=True,
+            stroke_color=PURE_RED,
+            stroke_width=3,
+            gloss=0,
+            shadow=0,
+        )
+        return [sphere.set_fill_by_checkerboard(BLUE, PURE_BLUE)]
+
+    orientation = {"phi": 60 * DEGREES, "theta": 30 * DEGREES}
+    cairo, _ = _image("cairo", surface, ThreeDScene, **orientation)
+    opengl, _ = _image("opengl", surface, ThreeDScene, **orientation)
+
+    # The outlines (and edges of the faces) land on the same pixels.
+    assert np.abs(opengl - cairo).mean() < 0.01
+    # The faces are shaded alike: the same brightness in the middle of the sphere.
+    middle = np.s_[
+        HEIGHT // 2 - 25 : HEIGHT // 2 + 25, WIDTH // 2 - 25 : WIDTH // 2 + 25
+    ]
+    assert opengl[middle].mean() == pytest.approx(cairo[middle].mean(), abs=0.005)

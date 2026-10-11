@@ -28,7 +28,7 @@ from manim.mobject.value_tracker import ValueTracker
 from manim.utils.color import WHITE, ManimColor, ParsableManimColor, get_shaded_rgb
 from manim.utils.family import extract_mobject_family_members
 from manim.utils.iterables import list_difference_update
-from manim.utils.space_ops import rotation_about_z, rotation_matrix
+from manim.utils.space_ops import get_unit_normal, rotation_about_z, rotation_matrix
 
 if TYPE_CHECKING:
     from manim.renderer.snapshot import RNode, RPath
@@ -329,6 +329,13 @@ class Camera:
         """The rotation from scene to view coordinates (looking along -z)."""
         return np.identity(3)
 
+    def _shade_faces(self, outlines: np.ndarray, colours: np.ndarray) -> np.ndarray:
+        """The colours of ``shade_in_3d`` faces at their two gradient ends, shape
+        ``(m, 2, 4)``, for face outlines as :func:`.face_outlines` makes them and one
+        colour per face. The same as shading each face as a path.
+        """
+        return np.repeat(colours[:, None], 2, axis=1)
+
     def _light_position(self) -> np.ndarray:
         """Where meshes are lit from."""
         return np.array([-10.0, 10.0, 10.0])
@@ -548,6 +555,30 @@ class ThreeDCamera(Camera):
 
     def _light_position(self) -> np.ndarray:
         return np.asarray(self.light_source.get_center(), dtype=float)
+
+    def _shade_faces(self, outlines: np.ndarray, colours: np.ndarray) -> np.ndarray:
+        shaded = np.repeat(colours[:, None], 2, axis=1)
+        if not self.should_apply_shading or len(outlines) == 0:
+            return shaded
+        count = outlines.shape[1]
+        light = self.light_source.points[0]
+        end = _end_corner_index(outlines[0])
+        for side, (index, before, after) in enumerate(
+            ((0, count - 4, 3), (end, end - 3, end + 3 if end < count - 3 else 3))
+        ):
+            point = outlines[:, index]
+            normals = _unit_normals(
+                outlines[:, after] - point, outlines[:, before] - point
+            )
+            to_sun = light - point
+            lengths = np.linalg.norm(to_sun, axis=1, keepdims=True)
+            to_sun = np.divide(
+                to_sun, lengths, out=np.zeros_like(to_sun), where=lengths > 0
+            )
+            amount = 0.5 * np.sum(normals * to_sun, axis=1) ** 3
+            amount = np.where(amount < 0, 0.5 * amount, amount)
+            shaded[:, side, :3] += amount[:, None]
+        return shaded
 
     def _sort_for_display(self, nodes: list[RNode]) -> list[RNode]:
         rot_matrix = self.get_rotation_matrix()
@@ -886,3 +917,28 @@ class ThreeDCamera(Camera):
 def _orientation_center(mobject: Mobject) -> Point3D | None:
     center_func = mobject.fixed_orientation
     return None if center_func is None else center_func()
+
+
+def _unit_normals(v1: np.ndarray, v2: np.ndarray) -> np.ndarray:
+    """:func:`.get_unit_normal` of each row pair, for outlines of at least two
+    sides (whose shading uses it).
+    """
+    tol = 1e-6
+    div1 = np.abs(v1).max(axis=1, keepdims=True)
+    div2 = np.abs(v2).max(axis=1, keepdims=True)
+    u1 = v1 / np.where(div1 == 0, 1, div1)
+    u2 = v2 / np.where(div2 == 0, 1, div2)
+    cp = np.stack(
+        (
+            u1[:, 1] * u2[:, 2] - u1[:, 2] * u2[:, 1],
+            u1[:, 2] * u2[:, 0] - u1[:, 0] * u2[:, 2],
+            u1[:, 0] * u2[:, 1] - u1[:, 1] * u2[:, 0],
+        ),
+        axis=1,
+    )
+    norm = np.sqrt(np.sum(cp * cp, axis=1))
+    result = cp / np.where(norm > tol, norm, 1)[:, None]
+    # Degenerate rows (aligned or null vectors) take the scalar path's fallbacks.
+    for row in np.flatnonzero(norm <= tol):
+        result[row] = get_unit_normal(v1[row], v2[row])
+    return result

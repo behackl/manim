@@ -307,3 +307,21 @@ def test_mobjects_fixed_in_frame_stay_put_when_the_camera_moves():
             np.testing.assert_array_equal(renderer.get_frame(), before)
         finally:
             renderer.close()
+
+
+def test_3d_faces_are_shaded_like_3d_paths():
+    from manim.renderer.cairo.mesh_faces import face_outlines
+
+    camera = ThreeDCamera()
+    camera.light_source.move_to([3, -2, 5])
+    corners = np.random.default_rng(1).normal(size=(30, 4, 3))
+    corners[0, 1] = corners[0, 0]  # a degenerate face, as at a sphere's pole
+    outlines = face_outlines(corners)
+    colours = np.random.default_rng(2).uniform(size=(30, 4))
+
+    shaded = camera._shade_faces(outlines, colours)
+
+    for outline, colour, ends in zip(outlines, colours, shaded, strict=True):
+        np.testing.assert_allclose(
+            ends, camera._shade(True, outline, colour[None]), rtol=1e-12
+        )

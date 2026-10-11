@@ -395,3 +395,31 @@ def test_3d_camera_computes_its_view_once_per_frame(monkeypatch):
         finally:
             renderer.close()
     assert len(reads) <= 2
+
+
+@pytest.mark.parametrize("change", ["assign", "in_place"])
+def test_redrawn_frames_follow_point_changes(change, monkeypatch):
+    from manim.mobject import fields
+
+    monkeypatch.setattr(fields, "STRICT", False)
+
+    def frame_of(mobject, renderer):
+        renderer.render_mobjects([mobject])
+        return renderer.get_frame().copy()
+
+    with tempconfig({"pixel_width": 64, "pixel_height": 36}):
+        square = Square(fill_opacity=1)
+        renderer, fresh = CairoRenderer(camera=Camera()), CairoRenderer(camera=Camera())
+        try:
+            before = frame_of(square, renderer)
+            assert np.array_equal(frame_of(square, renderer), before)
+            if change == "assign":
+                square.shift(RIGHT)
+            else:
+                square.points[:, 0] += 1  # deprecated, but must still be drawn
+            after = frame_of(square, renderer)
+            assert not np.array_equal(after, before)
+            np.testing.assert_array_equal(after, frame_of(square, fresh))
+        finally:
+            renderer.close()
+            fresh.close()

@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from manim import Square
+from manim import RIGHT, Square
 from manim.renderer.opengl import OpenGLRenderer
 from tests.assert_utils import assert_file_exists
 from tests.test_scene_rendering.simple_scenes import *
@@ -153,3 +153,18 @@ def test_pixel_coords_to_space_coords(config, using_opengl_renderer):
         renderer.pixel_coords_to_space_coords(px, py, top_left=True)
         == np.array([ex, -ey, ez])
     ).all()
+
+
+def test_moving_camera_frame_animates(config, using_opengl_renderer):
+    from manim import MovingCameraScene
+
+    config.dry_run = True
+
+    class PanAndZoom(MovingCameraScene):
+        def construct(self):
+            self.add(Square())
+            self.play(self.camera.frame.animate.scale(0.5).shift(RIGHT))
+
+    scene = PanAndZoom()
+    scene.render()
+    np.testing.assert_allclose(scene.camera.frame_center, RIGHT, atol=1e-12)

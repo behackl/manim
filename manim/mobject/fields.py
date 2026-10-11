@@ -175,7 +175,9 @@ def check_in_place_modifications(obj: object, names: Iterable[str]) -> None:
                 _warned.add(key)
                 logger.warning(
                     f"Modifying {type(obj).__name__}.{name} in place is deprecated "
-                    "and will stop working in a future release; assign a new array "
-                    "instead."
+                    "and will raise an error in a future release; assign a new array "
+                    f"instead (for example mobject.{name} = mobject.{name} + offset). "
+                    "Run with the environment variable MANIM_STRICT_FIELDS=1 to get "
+                    "the error now, at the line that modifies the array."
                 )
         checksums[name] = (version, checksum)

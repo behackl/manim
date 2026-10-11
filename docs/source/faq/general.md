@@ -247,3 +247,25 @@ In our [Discord server](https://manim.community/discord), we have the community-
 `#beginner-resources` channel in which links to helpful learning resources are collected.
 You are welcome to join our Discord and take a look yourself! If you have found some
 guides or tutorials yourself that are not on our list yet, feel free to add them!
+
+---
+
+## I get a warning that modifying `points` (or another attribute) in place is deprecated. What should I do?
+
+Mobjects record when their points, colors and other drawn attributes change, so
+renderers only redo work for what changed. Changing an array in place, for example
+`mob.points[0] = ORIGIN` or `mob.points += RIGHT`, bypasses this; Manim still notices
+it before drawing, but this will raise an error in a future release. Assign a new array
+instead:
+
+```python
+points = mob.points.copy()
+points[0] = ORIGIN
+mob.points = points
+
+mob.points = mob.points + RIGHT
+```
+
+To find the line that modifies an array, run with the environment variable
+`MANIM_STRICT_FIELDS=1`: the arrays are then read-only, and the modification raises
+an error where it happens.

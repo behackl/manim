@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from .mobject.mobject import Mobject, _AnimationBuilder
     from .renderer.cairo import CairoRenderer
     from .renderer.cairo.camera import Camera
-    from .renderer.opengl.camera import OpenGLCamera
     from .renderer.opengl.renderer import OpenGLRenderer
     from .renderer.protocol import _AnimationRenderer
     from .scene.scene import Scene
@@ -237,7 +236,7 @@ class Manager(Generic[SceneT]):
         return self.scene.renderer
 
     @property
-    def camera(self) -> Camera | OpenGLCamera:
+    def camera(self) -> Camera:
         """Return the current renderer's camera."""
         return self.renderer.camera
 

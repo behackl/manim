@@ -129,6 +129,9 @@ class Mobject:
     """
 
     points: ArrayField[Point3D_Array] = ArrayField(np.float64)
+    #: Whether the mobject may be a submobject of a VMobject (see
+    #: ``vectorized_mobject._is_vmobject_like``).
+    _vmobject_like: ClassVar[bool] = False
     z_index: Field[float] = Field()
     fixed_in_frame: Field[bool] = Field()
     #: ``None``, or the function giving the point the mobject keeps facing the camera
@@ -215,11 +218,18 @@ class Mobject:
         """
         return self._assert_valid_submobjects_internal(submobjects, Mobject)
 
+    @classmethod
+    def _accepts_submobject(cls, submobject: object) -> bool:
+        """Whether ``submobject`` may be a submobject of a mobject that holds only
+        mobjects of this class.
+        """
+        return isinstance(submobject, cls)
+
     def _assert_valid_submobjects_internal(
         self, submobjects: Iterable[Mobject], mob_class: type[Mobject]
     ) -> Self:
         for i, submob in enumerate(submobjects):
-            if not isinstance(submob, mob_class):
+            if not mob_class._accepts_submobject(submob):
                 error_message = (
                     f"Only values of type {mob_class.__name__} can be added "
                     f"as submobjects of {type(self).__name__}, but the value "

@@ -25,6 +25,7 @@ from manim.mobject.types.image_mobject import ImageMobjectFromCamera
 from manim.mobject.types.point_cloud_mobject import Point
 from manim.mobject.types.vectorized_mobject import VMobject
 from manim.mobject.value_tracker import ValueTracker
+from manim.renderer.snapshot import RMesh
 from manim.utils.color import WHITE, ManimColor, ParsableManimColor, get_shaded_rgb
 from manim.utils.family import extract_mobject_family_members
 from manim.utils.iterables import list_difference_update
@@ -584,7 +585,12 @@ class ThreeDCamera(Camera):
         rot_matrix = self.get_rotation_matrix()
 
         def z_key(node: RNode) -> float:
-            reference_point = getattr(node.payload, "z_reference_point", None)
+            payload = node.payload
+            reference_point = getattr(payload, "z_reference_point", None)
+            if isinstance(payload, RMesh) and len(payload.points):
+                # A whole mesh (on OpenGL; Cairo sorts its faces) goes by its middle.
+                points = np.asarray(payload.points)
+                reference_point = (points.min(axis=0) + points.max(axis=0)) / 2
             if reference_point is None:
                 return np.inf  # type: ignore[no-any-return]
             return self._depth(reference_point, rot_matrix)

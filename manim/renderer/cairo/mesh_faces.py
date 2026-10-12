@@ -59,11 +59,14 @@ def mesh_faces(node: RNode, camera: Camera) -> list[RNode]:
         if mesh.stroke_width == 0
         else None
     )
+    strokes = np.asarray(mesh.stroke_rgbas)
+    per_face = len(strokes) == len(faces) > 1
     nodes = []
     for index in np.argsort(depth, kind="stable"):
         outline = outlines[index]
         fill = colours[index : index + 1]
-        stroke, width = mesh.stroke_rgbas, mesh.stroke_width
+        stroke = strokes[index : index + 1] if per_face else strokes[:1]
+        width = mesh.stroke_width
         if seam is not None and fill[0, 3] >= 1:
             stroke, width = fill, seam
         path = RPath(

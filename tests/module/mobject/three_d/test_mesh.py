@@ -5,7 +5,15 @@ from manim import (
     BLUE,
     RED,
     WHITE,
+    Dot3D,
+    Mobject,
     ParametricSurface,
+    Sphere,
+    Square,
+    Surface,
+    ThreeDAxes,
+    VGroup,
+    VMobject,
 )
 
 
@@ -79,3 +87,50 @@ def test_wireframe_follows_the_parameter_lines():
     assert len(wireframe) == (4 + 1) + (3 + 1)
     np.testing.assert_allclose(wireframe[0].get_start(), [-1, 0, 0])
     np.testing.assert_allclose(wireframe[0].get_end(), [-1, 3, -3])
+
+
+def test_surface_colours_faces_by_value_at_their_outlines_middle():
+    from manim.mobject.three_d.three_dimensions import _halfway_around
+
+    axes = ThreeDAxes(x_range=[0, 4], y_range=[0, 4], z_range=[0, 4])
+    surface = Surface(
+        lambda u, v: axes.c2p(u, v, u * v / 4),
+        u_range=[0, 4],
+        v_range=[0, 4],
+        resolution=4,
+    )
+    # Halfway around a face's outline, as get_midpoint of the face as a path.
+    for corners, point in zip(
+        surface.points[surface.get_faces()], _halfway_around(surface), strict=True
+    ):
+        face = VMobject().set_points_as_corners([*corners, corners[0]])
+        np.testing.assert_allclose(point, face.get_midpoint(), atol=1e-9)
+
+    surface.set_fill_by_value(axes, [(RED, 0), (WHITE, 4)], axis=2)
+
+    values = axes.point_to_coords(_halfway_around(surface))[:, 2] / 4
+    expected = (1 - values[:, None]) * RED.to_rgb() + values[:, None] * WHITE.to_rgb()
+    np.testing.assert_allclose(surface.rgbas[::4, :3], expected, atol=1e-9)
+    # The outlines take the faces' colours, as the faces' strokes did.
+    np.testing.assert_allclose(surface.stroke_rgbas[:, :3], expected, atol=1e-9)
+
+
+def test_meshes_can_be_in_vector_groups():
+    group = VGroup(Square(), Sphere(), Dot3D())
+
+    group.set_color(RED)
+
+    assert group[1].fill_color == RED
+    with pytest.raises(TypeError, match="Group instead"):
+        VGroup(Square(), Mobject())
+
+
+def test_partial_surfaces_show_whole_faces_with_their_outlines():
+    surface = Surface(lambda u, v: [u, v, 0], resolution=4)
+    surface.set_fill_by_value(
+        ThreeDAxes(x_range=[0, 1], y_range=[0, 1], z_range=[0, 1]), [RED, WHITE], axis=0
+    )
+    partial = surface.copy().pointwise_become_partial(surface, 0, 0.5)
+
+    assert len(partial.get_faces()) == 8
+    np.testing.assert_array_equal(partial.stroke_rgbas, surface.stroke_rgbas[:8])

@@ -546,13 +546,16 @@ class SnapshotDrawing:
         vertices = np.zeros(count * k, dtype=_MESH_DTYPE)
         vertices["point"] = corners.reshape(-1, 3)
         vertices["normal"] = self._normals.get(node, mesh)[flat]
-        stroke = np.asarray(mesh.stroke_rgbas)[:1]
+        stroke = np.asarray(mesh.stroke_rgbas)
+        stroke = (
+            stroke if len(stroke) == count else np.repeat(stroke[:1], count, axis=0)
+        )
         if mesh.shade_in_3d:
             outlines = face_outlines(corners)
             camera = self._target.camera
             colours = face_colours(mesh, faces)
             fills = camera._shade_faces(outlines, colours)
-            strokes = camera._shade_faces(outlines, np.repeat(stroke, count, axis=0))
+            strokes = camera._shade_faces(outlines, stroke)
             # Along the gradient from the first corner to the end corner, as a path.
             start = outlines[:, 0]
             axis = outlines[:, ((outlines.shape[1] - 1) // 6) * 3] - start
@@ -570,7 +573,7 @@ class SnapshotDrawing:
             vertices["color"] = (
                 rgbas[flat] if len(rgbas) == len(mesh.points) else rgbas[0]
             )
-            vertices["stroke"] = stroke[0]
+            vertices["stroke"] = np.repeat(stroke, k, axis=0)
             if textured:
                 vertices["uv"] = np.asarray(mesh.uvs)[flat]
         if mesh.stroke_width > 0 and k in (3, 4):

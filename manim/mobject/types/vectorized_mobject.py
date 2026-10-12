@@ -129,6 +129,13 @@ def _subpath_split_indices(
     return np.stack([split_points[:-1], split_points[1:]], axis=1)
 
 
+def _is_vmobject_like(mobject: object) -> bool:
+    """Whether ``mobject`` may be a submobject of a :class:`VMobject`: vectorized
+    mobjects, and meshes, which have the styling methods that groups call.
+    """
+    return isinstance(mobject, Mobject) and type(mobject)._vmobject_like
+
+
 class VMobject(Mobject):
     """A vectorized mobject.
 
@@ -154,6 +161,7 @@ class VMobject(Mobject):
         for options.
     """
 
+    _vmobject_like = True
     fill_rgbas: ArrayField[FloatRGBA_Array] = ArrayField(np.float64)
     stroke_rgbas: ArrayField[FloatRGBA_Array] = ArrayField(np.float64)
     background_stroke_rgbas: ArrayField[FloatRGBA_Array] = ArrayField(np.float64)
@@ -234,6 +242,10 @@ class VMobject(Mobject):
 
     def _assert_valid_submobjects(self, submobjects: Iterable[VMobject]) -> Self:
         return self._assert_valid_submobjects_internal(submobjects, VMobject)
+
+    @classmethod
+    def _accepts_submobject(cls, submobject: object) -> bool:
+        return _is_vmobject_like(submobject)
 
     def __iter__(self) -> Iterator[VMobject]:
         return cast(Iterator[VMobject], super().__iter__())
@@ -1233,6 +1245,8 @@ class VMobject(Mobject):
         assert mode in ["jagged", "smooth"], 'mode must be either "jagged" or "smooth"'
         nppcc = self.n_points_per_cubic_curve
         for submob in self.family_members_with_points():
+            if not isinstance(submob, VMobject):
+                continue
             subpaths = submob.get_subpaths()
             submob.clear_points()
             # A subpath can be composed of several bezier curves.
@@ -1320,6 +1334,8 @@ class VMobject(Mobject):
             ``self``
         """
         for submob in self.family_members_with_points():
+            if not isinstance(submob, VMobject):
+                continue
             if len(submob.points) < self.n_points_per_cubic_curve:
                 # The case that a bezier quad is not complete (there is no bezier curve as there is not enough control points.)
                 continue
@@ -1811,7 +1827,14 @@ class VMobject(Mobject):
     def get_points_defining_boundary(self) -> Point3D_Array:
         # Probably returns all anchors, but this is weird regarding  the name of the method.
         return np.array(
-            tuple(it.chain(*(sm.get_anchors() for sm in self.get_family())))
+            tuple(
+                it.chain(
+                    *(
+                        sm.get_anchors() if isinstance(sm, VMobject) else sm.points
+                        for sm in self.get_family()
+                    )
+                )
+            )
         )
 
     def get_arc_length(self, sample_points_per_curve: int | None = None) -> float:
@@ -2358,11 +2381,11 @@ class VGroup(VMobject):
         valid_vmobjects = []
 
         for i, vmobject in enumerate(vmobjects):
-            if isinstance(vmobject, VMobject):
+            if _is_vmobject_like(vmobject):
                 valid_vmobjects.append(vmobject)
             elif isinstance(vmobject, Iterable) and not isinstance(vmobject, Mobject):
                 for j, subvmobject in enumerate(vmobject):
-                    if not isinstance(subvmobject, VMobject):
+                    if not _is_vmobject_like(subvmobject):
                         raise TypeError(get_type_error_message(subvmobject, (i, j)))
                     valid_vmobjects.append(subvmobject)
             elif isinstance(vmobject, Iterable) and isinstance(vmobject, Mobject):

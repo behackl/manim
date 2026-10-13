@@ -23,6 +23,7 @@ from manim import (
     Annulus,
     Arc,
     Circle,
+    Dot,
     ImageMobject,
     Line,
     MathTex,
@@ -33,6 +34,7 @@ from manim import (
     Text,
     ThreeDScene,
     Triangle,
+    VGroup,
     VMobject,
     ZoomedScene,
     tempconfig,
@@ -193,3 +195,65 @@ def test_scenes_match_cairo(using_opengl_renderer, scene_class, build):
 
     assert opengl.sum() == pytest.approx(cairo.sum(), rel=0.05)
     assert np.abs(opengl - cairo).mean() < 0.01
+
+
+def test_animations_start_frames_from_the_still_mobjects(using_opengl_renderer):
+    frames, drawn = [], []
+
+    class Moving(Scene):
+        def construct(self):
+            still = VGroup(
+                Square(3, fill_opacity=1, color=RED),
+                Circle(fill_opacity=0.5, color=GREEN).shift(UP),
+            )
+            dot = Dot(color=YELLOW)
+            self.add(still, dot)
+            renderer = self.renderer
+            update_frame, draw = renderer.update_frame, renderer._draw_snapshots
+
+            def capture(scene):
+                update_frame(scene)
+                frames.append(renderer.get_frame().copy())
+
+            def record(scene, mobjects=None):
+                drawn.append(mobjects)
+                draw(scene, mobjects)
+
+            renderer.update_frame = capture
+            renderer._draw_snapshots = record
+            # Ends early, so that the last frame shows the end state.
+            self.play(
+                dot.animate.shift(RIGHT),
+                run_time=0.2,
+                rate_func=lambda t: min(2 * t, 1),
+            )
+            # The same frame drawn from scratch.
+            update_frame(self)
+            frames.append(renderer.get_frame().copy())
+
+    with tempconfig({"dry_run": True, "pixel_width": 192, "pixel_height": 108}):
+        Moving().render()
+
+    # Only the dot is drawn in each frame.
+    assert [len(mobjects) for mobjects in drawn[:-1]] == [1] * (len(drawn) - 1)
+    np.testing.assert_array_equal(frames[-2], frames[-1])
+
+
+def test_still_mobjects_are_drawn_again_when_the_view_changes(using_opengl_renderer):
+    with tempconfig({"dry_run": True, "pixel_width": 192, "pixel_height": 108}):
+        scene = MovingCameraScene()
+        still, dot = Square(3, fill_opacity=1, color=RED), Dot()
+        scene.add(still, dot)
+        scene.static_mobjects = [still]
+        renderer = scene.renderer
+        renderer._prepare_animation(scene)
+        # The view changes without the scene knowing, as in interactive mode.
+        scene.camera.frame.shift(LEFT)
+        renderer.render(scene, 0, [dot])
+        reused = renderer.get_frame().copy()
+        renderer.static_image = None
+        renderer.update_frame(scene)
+        fresh = renderer.get_frame().copy()
+        renderer.close()
+
+    np.testing.assert_array_equal(reused, fresh)

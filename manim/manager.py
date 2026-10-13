@@ -917,7 +917,7 @@ class Manager(Generic[SceneT]):
             if per_sample:
                 scene.update_mobjects(0)
         finally:
-            self.renderer.static_image = None  # type: ignore[union-attr]
+            self.renderer.static_image = None
             scene.time_progression.close()
 
     def _draw_animation_frame(self, frame_offset: float) -> RGBAPixelArray | None:

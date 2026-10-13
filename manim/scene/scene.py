@@ -1376,12 +1376,11 @@ class Scene:
             animation._setup_scene(self)
             animation.begin()
 
-        if config.renderer == RendererType.CAIRO:
-            # Identify mobjects whose pixels can be reused between frames.
-            (
-                self.moving_mobjects,
-                self.static_mobjects,
-            ) = self.get_moving_and_static_mobjects(self.animations)
+        # Identify mobjects whose pixels can be reused between frames.
+        (
+            self.moving_mobjects,
+            self.static_mobjects,
+        ) = self.get_moving_and_static_mobjects(self.animations)
 
     def is_current_animation_frozen_frame(self) -> bool:
         """Returns whether the current animation produces a static frame (generally a Wait)."""

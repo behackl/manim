@@ -19,7 +19,7 @@ from manim.renderer._mesh import face_colors, face_normals, face_outlines, faces
 from manim.renderer.snapshot import RMesh, RNode, RPath, RSolid, Stroke
 
 if TYPE_CHECKING:
-    from .camera import Camera
+    from manim.camera import Camera
 
 __all__ = ["mesh_faces"]
 

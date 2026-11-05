@@ -21,11 +21,11 @@ import numpy as np
 from PIL.Image import Resampling
 
 from manim._config import config
+from manim.camera import ThreeDCamera
 from manim.material import Pbr
 from manim.renderer._lighting import AMBIENT, DEFAULT_LIGHT_INTENSITY
 from manim.renderer._mesh import faces_of
 from manim.renderer._paint import paint_colors, shows
-from manim.renderer.cairo.camera import ThreeDCamera
 from manim.renderer.snapshot import (
     LegacyShaded,
     RCameraView,
@@ -41,7 +41,7 @@ from .shader import Shader
 from .winding_fill import WindingFill
 
 if TYPE_CHECKING:
-    from manim.renderer.cairo.camera import Camera
+    from manim.camera import Camera
     from manim.renderer.snapshot import Material
 
     from .renderer import OpenGLRenderer, _CameraView

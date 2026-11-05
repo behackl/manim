@@ -64,8 +64,7 @@ def test_render_opens_before_setup_and_close_retires_real_objects(
     monkeypatch.setattr(scene, "setup", setup)
     with scene._get_manager():
         scene.render()
-        # The final state is drawn when it is read.
-        renderer.get_frame()
+        scene.get_image()
         context = renderer.context
         frame = renderer.frame_buffer_object
         textures = renderer._snapshot_drawing._textures

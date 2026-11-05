@@ -119,8 +119,6 @@ class OpenGLRenderer(_RendererExecutionView):
         self._frame_buffer_object: Framebuffer | None = None
         self._context_thread: int | None = None
         self._capturing_image = False
-        # A finished scene whose final state is drawn on the first pixel read.
-        self._final_scene: Scene | None = None
         self._keep_image_renderer = False
         self._image_renderer: OpenGLRenderer | None = None
         self._closed = False
@@ -438,7 +436,6 @@ class OpenGLRenderer(_RendererExecutionView):
 
     def _draw(self, nodes: Sequence[RNode], config: RenderConfig) -> None:
         """Draw a frame into the framebuffer, camera views first."""
-        self._final_scene = None
         self._set_view(config)
         views = self._draw_camera_views(config)
         self.frame_buffer_object.use()
@@ -673,43 +670,6 @@ class OpenGLRenderer(_RendererExecutionView):
         finally:
             self._capturing_image = False
 
-    def scene_finished(self, scene: Scene) -> None:
-        """Finalize configured output for the scene.
-
-        Parameters
-        ----------
-        scene
-            The scene that has finished rendering.
-        """
-        output = self.file_writer.output_spec
-        if self.num_plays > 0 and (output.is_video or output.is_image_sequence):
-            self.file_writer.finish()
-        # Skipped and cached plays do not draw, so the framebuffer may not show
-        # the final state. A preview window shows it; offscreen, it is drawn
-        # when the pixels are read, not for every scene.
-        if self.window is not None:
-            self.update_frame(scene)
-        else:
-            self._final_scene = scene
-
-        if self.should_save_last_frame():
-            self.file_writer.save_image(self.get_frame())
-
-    def should_save_last_frame(self) -> bool:
-        """
-        Determine whether the last frame of the scene should be saved.
-
-        This is true for explicit last-frame PNG output and for automatic video
-        output when the scene has no play calls. Interactive scenes do not use
-        the automatic fallback.
-        """
-        output = self.file_writer.output_spec
-        if output.is_still:
-            return True
-        if self.scene.interactive_mode:
-            return False
-        return self.num_plays == 0 and output.fallback_to_still
-
     def get_image(self) -> Image.Image:
         """
         Get the current OpenGL frame buffer as a PIL Image.
@@ -829,9 +789,6 @@ class OpenGLRenderer(_RendererExecutionView):
         # gl.glBlitFramebuffer(
         #     0, 0, pw, ph, 0, 0, pw, ph, gl.GL_COLOR_BUFFER_BIT, gl.GL_LINEAR
         # )
-        if self._final_scene is not None:
-            scene, self._final_scene = self._final_scene, None
-            self.update_frame(scene)
         num_channels = 4
         ret: bytes = self.frame_buffer_object.read(
             viewport=self.frame_buffer_object.viewport,

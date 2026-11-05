@@ -5,10 +5,12 @@ import datetime
 import threading
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pytest
 import srt
+from PIL import Image
 
-from manim import Manager, Scene, tempconfig
+from manim import RIGHT, Manager, Scene, Square, tempconfig
 from manim._config.output import OutputFormat
 from manim.animation.animation import Wait
 from manim.constants import RendererType
@@ -87,18 +89,15 @@ def test_manager_rejects_explicit_video_for_scene_without_play_calls(
 
 def test_manager_warns_when_automatic_video_falls_back_to_still(config):
     config.format = "auto"
-    renderer = Mock()
-    renderer._claim_execution.return_value = _ExecutionState()
-    renderer.capabilities = RendererCapabilities()
-    renderer.num_plays = 0
-    scene = Scene(renderer)
+    scene = Scene()
     manager = Manager(scene)
     manager._file_writer = Mock(final_file_path="scene.png")
 
     with patch("manim.manager.logger.warning") as warning:
         manager.post_construct()
 
-    renderer.scene_finished.assert_called_once_with(scene)
+    # The last frame is saved as a still instead.
+    manager._file_writer.save_image.assert_called_once()
     warning.assert_called_once_with(
         f"{scene} has no play calls. Automatic video output has been saved as a "
         "PNG instead.",
@@ -222,7 +221,7 @@ def test_manager_render_retires_rerun_without_finishing_scene(dry_run, monkeypat
     manager = Manager(scene)
     scene.renderer.num_plays = 3
     finish = Mock()
-    monkeypatch.setattr(scene.renderer, "scene_finished", finish)
+    monkeypatch.setattr(manager, "post_construct", finish)
 
     assert manager.render() is True
 
@@ -234,11 +233,6 @@ def test_manager_render_retires_rerun_without_finishing_scene(dry_run, monkeypat
 
 def test_manager_render_finalizes_after_early_scene_end(dry_run):
     lifecycle: list[str] = []
-    renderer = Mock(_closed=False, _retiring=False)
-    renderer.num_plays = 0
-    renderer.scene_finished.side_effect = lambda scene: lifecycle.append(
-        "post_construct"
-    )
 
     class EarlyEndScene(Scene):
         def construct(self):
@@ -247,11 +241,18 @@ def test_manager_render_finalizes_after_early_scene_end(dry_run):
         def tear_down(self):
             lifecycle.append("tear_down")
 
-    scene = EarlyEndScene(renderer)
+    scene = EarlyEndScene()
+    manager = Manager(scene)
+    post_construct = manager.post_construct
 
-    assert Manager(scene).render() is False
+    def finish():
+        lifecycle.append("post_construct")
+        post_construct()
 
-    renderer.scene_finished.assert_called_once_with(scene)
+    manager.post_construct = finish
+
+    assert manager.render() is False
+
     assert lifecycle == ["tear_down", "post_construct"]
 
 
@@ -415,3 +416,28 @@ def test_scene_add_sound_passes_placement_to_the_writer(dry_run, monkeypatch):
     file_writer.add_sound.assert_called_once_with(
         "skipped.wav", 2.5, None, gain_to_background=None
     )
+
+
+@pytest.mark.parametrize("renderer", ["cairo", "opengl"])
+def test_last_frame_output_shows_the_final_state(tmp_path, renderer):
+    class Moves(Scene):
+        def construct(self):
+            square = Square(fill_opacity=1)
+            self.play(square.animate.shift(3 * RIGHT), run_time=0.5)
+
+    with tempconfig(
+        {
+            "renderer": renderer,
+            "format": "png",
+            "media_dir": str(tmp_path),
+            "pixel_width": 64,
+            "pixel_height": 36,
+            "live_preview": False,
+        }
+    ):
+        scene = Moves()
+        with scene._get_manager() as manager:
+            manager.render()
+            expected = np.asarray(scene.get_image())
+            saved = np.asarray(Image.open(manager.file_writer.image_file_path))
+    np.testing.assert_array_equal(saved[..., :3], expected[..., :3])

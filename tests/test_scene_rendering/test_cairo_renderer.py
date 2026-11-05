@@ -183,7 +183,7 @@ def test_last_frame_is_drawn_after_a_cached_render(using_temp_config):
         scene = _FillsACircle()
         with scene._get_manager() as manager:
             manager.render()
-            return scene.renderer.get_frame().copy()
+            return np.asarray(scene.get_image())
 
     cold = last_frame()
     warm = last_frame()

@@ -65,8 +65,6 @@ class CairoRenderer(_RendererExecutionView):
             base_pixel_height=int(config["pixel_height"]),
         )
         self._target: _CairoRenderTarget | None = None
-        # A finished scene whose final state is drawn on the first pixel read.
-        self._final_scene: Scene | None = None
         self._sub_targets: dict[int, _CairoRenderTarget] = {}
         self._frame_builder: FrameBuilder | None = None
         # The drawing of the leading nodes of a frame of the whole scene that did
@@ -136,7 +134,6 @@ class CairoRenderer(_RendererExecutionView):
         :mod:`manim.renderer._reuse`).
         """
         self._ensure_open()
-        self._final_scene = None
         target = self._target_for(config)
         pictures = self._draw_camera_views(config)
 
@@ -294,13 +291,7 @@ class CairoRenderer(_RendererExecutionView):
 
     def get_frame(self) -> RGBAPixelArray:
         """Copy the current image to an RGBA array, with row zero at the top."""
-        self._draw_final_state()
         return self._get_target().read_pixels()
-
-    def _draw_final_state(self) -> None:
-        scene, self._final_scene = self._final_scene, None
-        if scene is not None:
-            self.update_frame(scene)
 
     @contextlib.contextmanager
     def _scene_images(self) -> Iterator[None]:
@@ -344,18 +335,6 @@ class CairoRenderer(_RendererExecutionView):
     def update_skipping_status(self) -> None:
         self._scene._get_manager()._update_skipping_status()
 
-    def scene_finished(self, scene: Scene) -> None:
-        self._ensure_open()
-        output = self.file_writer.output_spec
-        if self.num_plays and (output.is_video or output.is_image_sequence):
-            self.file_writer.finish()
-        # Skipped and cached plays do not draw, so the buffer may not show the
-        # final state. Draw it when the pixels are read, not for every scene.
-        self._final_scene = scene
-
-        if output.is_still or (not self.num_plays and output.fallback_to_still):
-            self.file_writer.save_image(self.get_frame())
-
     def open(self) -> None:
         """Check that the renderer can draw.
 
@@ -377,7 +356,6 @@ class CairoRenderer(_RendererExecutionView):
         self._sub_targets.clear()
         self._memo.clear()
         self._saved_pixels = None
-        self._final_scene = None
 
 
 def _background_key(config: RenderConfig) -> tuple[Any, ...]:

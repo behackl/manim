@@ -588,9 +588,10 @@ class Manager(Generic[SceneT]):
     def post_construct(self) -> None:
         """Finalize output after scene construction and tear-down.
 
-        This validates empty video output, asks the renderer to finish the scene,
-        and logs the number of played animations. :meth:`tear_down` runs first,
-        so its changes to the scene are included in last-frame image output.
+        This validates empty video output, finishes the movie, saves the last
+        frame if the output asks for it, and logs the number of played
+        animations. :meth:`tear_down` runs first, so its changes to the scene are
+        included in last-frame image output.
         """
         output = self.output_spec
         empty_video_output = self.num_plays == 0 and output.is_video
@@ -601,7 +602,19 @@ class Manager(Generic[SceneT]):
                 "Use --format=png to save its last frame.",
             )
 
-        self.renderer.scene_finished(self.scene)
+        writer = self.file_writer
+        if self.num_plays and (output.is_video or output.is_image_sequence):
+            writer.finish()
+        # Interactive scenes end in their window, without the automatic fallback.
+        fallback = (
+            not self.num_plays
+            and output.fallback_to_still
+            and not self.scene.interactive_mode
+        )
+        if output.is_still or fallback:
+            # Skipped and cached plays do not draw: draw the final state.
+            writer.save_image(self.renderer.render(*self._frame()))
+        self._show_final_state()
 
         if (
             empty_video_output
@@ -618,6 +631,14 @@ class Manager(Generic[SceneT]):
             logger.info(
                 f"Rendered {str(self.scene)}\nPlayed {self.num_plays} animations",
             )
+
+    def _show_final_state(self) -> None:
+        """Show the scene's final state in the preview window, if there is one.
+
+        Skipped and cached plays do not draw, so the window may not show it yet.
+        """
+        if self.session_spec.presentation.live_preview:
+            self.renderer.render(*self._frame())
 
     def tear_down(self) -> None:
         """Run the managed scene's :meth:`~manim.scene.scene.Scene.tear_down` hook."""

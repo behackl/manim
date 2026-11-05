@@ -2781,7 +2781,7 @@ class VDict(VMobject):
         self._assert_valid_submobjects([value])
         mob = value
         if self.show_keys:
-            # This import is here and not at the top to avoid circular import
+            # Import here: manim.mobject.text.tex_mobject imports this module.
             from manim.mobject.text.tex_mobject import Tex
 
             key_text = Tex(str(key)).next_to(value, LEFT)

@@ -11,11 +11,14 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
+from ..animation.animation import Wait
+from ..scene.audio_mixer import _probe_duration
+from ..timeline import _SCHEMA, _VERSION, Timeline, _dumps
+from ..utils.sounds import get_full_sound_file_path
 from .loop import _Caption, _RunListener, _Section
 
 if TYPE_CHECKING:
     from ..manager import Manager
-    from ..timeline import Timeline
     from .loop import _Play, _Sound
 
 __all__: list[str] = []
@@ -158,8 +161,6 @@ class _RunRecord(_RunListener):
         return time
 
     def play_started(self, play: _Play) -> None:
-        from ..animation.animation import Wait
-
         animations = play.animations
         kind = (
             "wait"
@@ -236,9 +237,6 @@ class _RunRecord(_RunListener):
 
     def _sound_duration(self, sound: _Sound) -> float | None:
         """Read a sound's duration from its file's headers, as rendering checks it."""
-        from ..scene.audio_mixer import _probe_duration
-        from ..utils.sounds import get_full_sound_file_path
-
         assets = self._manager.scene.file_writer_settings.assets_dir
         return _probe_duration(get_full_sound_file_path(sound.file, assets))
 
@@ -248,8 +246,6 @@ class _RunRecord(_RunListener):
 
     def timeline(self) -> Timeline:
         """Export the record of a finished run as a :class:`.Timeline`."""
-        from ..timeline import _SCHEMA, _VERSION, Timeline, _dumps
-
         if self._failed:
             raise RuntimeError("Timeline capture failed earlier during this run.")
         if self._end is None or self._active is not None:

@@ -26,6 +26,7 @@ from ._run.loop import (
 )
 from ._run.record import _RunRecord
 from ._run.selection import _OutputSelection
+from .renderer.cairo.renderer import CairoRenderer
 from .scene.section import DefaultSectionType
 from .utils.exceptions import EndSceneEarlyException, RerunSceneException
 from .utils.file_ops import open_media_file
@@ -750,8 +751,6 @@ class Manager(Generic[SceneT]):
         even without file output. OpenGL reads them back only for video and
         image-sequence output.
         """
-        from .renderer.cairo.renderer import CairoRenderer
-
         output = self.output_spec
         return (
             isinstance(self.renderer, CairoRenderer)

@@ -1084,6 +1084,7 @@ class Mobject:
         Pass a ``camera`` to select the view, or omit it to create a default
         :class:`.Camera`. To use a scene's current view, pass ``camera=scene.camera``.
         """
+        # Import here: the renderer and camera modules import this module.
         from manim.renderer.cairo import CairoRenderer
         from manim.renderer.cairo.camera import Camera
 
@@ -2948,6 +2949,7 @@ class Mobject:
 
 
         """
+        # Import here: manim.mobject.geometry.line imports this module.
         from manim.mobject.geometry.line import Line
 
         mobs = self.submobjects.copy()
@@ -3755,6 +3757,7 @@ class _AnimationBuilder:
         return update_target
 
     def build(self) -> Animation:
+        # Import here: manim.animation.transform imports this module.
         from ..animation.transform import _MethodAnimation
 
         anim = self.overridden_animation or _MethodAnimation(self.mobject, self.methods)

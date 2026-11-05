@@ -95,6 +95,7 @@ from docutils import nodes
 from docutils.parsers.rst import Directive, directives
 from docutils.statemachine import StringList
 
+from manim._config import config, tempconfig
 from manim._version import __version__ as manim_version
 from manim.constants import QUALITIES
 
@@ -210,8 +211,6 @@ class ManimDirective(Directive):
                 node,
             )
             return [node]
-
-        from manim._config import config, tempconfig
 
         global classnamedict
 

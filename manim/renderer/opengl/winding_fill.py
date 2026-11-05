@@ -56,6 +56,7 @@ def pack(
     colours: list[tuple[np.ndarray, tuple[np.ndarray, np.ndarray] | None]],
 ) -> np.ndarray:
     """The two triangles per quadratic piece of several paths, built in one pass."""
+    # Import here: manim.renderer.opengl.drawing imports this module.
     from .drawing import _colours, _concatenate
 
     quads, counts, offsets = _concatenate(geometry)

@@ -164,13 +164,13 @@ magnified region of the scene::
 Multiple camera views
 ---------------------
 
-The Cairo backend supports several camera views within one scene through
+Both renderers support several camera views within one scene through
 :class:`.MultiCamera`. The primary camera draws the overall scene; each
 secondary camera supplies an image displayed by an
 :class:`.ImageMobjectFromCamera` mobject.
 During the execution of the scene, the renderer draws each camera's view into its
-display mobject. Both renderers support it; the OpenGL renderer does not draw
-nested views (a :class:`.MultiCamera` used as a secondary camera).
+display mobject. Camera views do not show camera views: where another inset lies
+in a secondary camera's view, that view shows its background.
 
 There are two independent controls:
 
@@ -233,10 +233,8 @@ All cameras view the same scene contents. Each display and its border are exclud
 from their own camera's view. In the example, both detail cameras look below the
 insets, keeping the insets out of each other's views.
 
-For nested insets, use a :class:`.MultiCamera` as a secondary camera and register
-its displays there. Keep this hierarchy acyclic: camera registrations that form
-a cycle raise an error. Cameras registered at the same level are drawn in order;
-place their displays outside each other's views, as above, for independent insets.
+Place the displays outside each other's views, as above, for independent
+insets.
 
 To remove a view entirely, remove both its visible mobject and its registration::
 

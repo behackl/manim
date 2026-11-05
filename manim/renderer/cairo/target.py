@@ -11,11 +11,12 @@ import cairo
 import numpy as np
 from PIL import Image
 
+from manim.renderer._view import view_transform_center
 from manim.utils.color import color_to_int_rgba
 from manim.utils.images import get_full_raster_image_path
 
 if TYPE_CHECKING:
-    from manim.camera import Camera
+    from manim.renderer.protocol import CameraState, RenderConfig
     from manim.typing import RGBAPixelArray
 
 
@@ -116,7 +117,7 @@ class _CairoRenderTarget:
             (settings.pixel_height, settings.pixel_width, 4),
             dtype=np.uint8,
         )
-        self._background_key: tuple[object, ...] | None = None
+        self._current_background: tuple[object, ...] | None = None
         self._background = np.zeros_like(self._pixels)
         self._context_key: tuple[float, ...] | None = None
         self._context: cairo.Context | None = None
@@ -134,39 +135,38 @@ class _CairoRenderTarget:
         self._ensure_open()
         return self._pixels
 
-    def _camera_background_key(self, camera: Camera) -> tuple[object, ...]:
+    def _background_key(self, config: RenderConfig) -> tuple[object, ...]:
         return (
-            camera.background_image,
+            config.background_image,
             tuple(
-                camera.background_color.to_rgba_with_alpha(
-                    camera.background_opacity,
-                ),
+                config.background_color.to_rgba_with_alpha(config.background_opacity)
             ),
         )
 
-    def _load_background(self, camera: Camera) -> RGBAPixelArray:
+    def _load_background(self, config: RenderConfig) -> RGBAPixelArray:
         settings = self.settings
-        if camera.background_image is None:
+        if config.background_image is None:
             background = np.empty_like(self._pixels)
             background[:, :] = color_to_int_rgba(
-                camera.background_color,
-                camera.background_opacity,
+                config.background_color,
+                config.background_opacity,
             )
             return background
 
-        path = get_full_raster_image_path(camera.background_image)
+        path = get_full_raster_image_path(config.background_image)
         with Image.open(path) as source:
             image = source.convert("RGBA")
             if image.size != (settings.pixel_width, settings.pixel_height):
                 image = image.resize((settings.pixel_width, settings.pixel_height))
             return np.asarray(image, dtype=np.uint8).copy()
 
-    def reset(self, camera: Camera) -> None:
+    def reset(self, config: RenderConfig) -> None:
+        """Fill the target with the background of ``config``."""
         self._ensure_open()
-        key = self._camera_background_key(camera)
-        if key != self._background_key:
-            self._background = self._load_background(camera)
-            self._background_key = key
+        key = self._background_key(config)
+        if key != self._current_background:
+            self._background = self._load_background(config)
+            self._current_background = key
         np.copyto(self._pixels, self._background)
 
     def clear(self) -> None:
@@ -191,10 +191,10 @@ class _CairoRenderTarget:
             raise TypeError("Cairo target pixels must use uint8.")
         np.copyto(self._pixels, pixels)
 
-    def get_context(self, camera: Camera) -> cairo.Context:
+    def get_context(self, camera: CameraState) -> cairo.Context:
         self._ensure_open()
         settings = self.settings
-        center = camera.get_view_transform_center()
+        center = view_transform_center(camera)
         view_key = (
             float(center[0]),
             float(center[1]),
@@ -269,6 +269,6 @@ class _CairoRenderTarget:
             self._scratch_target = None
         self.background_image_cache.clear()
         self.path_cache.clear()
-        self._background_key = None
+        self._current_background = None
         self._pixels = np.empty((0, 0, 4), dtype=np.uint8)
         self._background = self._pixels

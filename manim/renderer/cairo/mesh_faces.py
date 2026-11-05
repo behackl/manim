@@ -17,7 +17,7 @@ from manim.renderer.snapshot import IDENTITY, RMesh, RNode, RPath
 from manim.utils.bezier import interpolate
 
 if TYPE_CHECKING:
-    from manim.camera import Camera
+    from manim.renderer.protocol import CameraState
 
 __all__ = ["face_colours", "face_outlines", "mesh_faces"]
 
@@ -30,7 +30,7 @@ _NO_COLOR.flags.writeable = False
 _THIRDS = np.array([0, 1 / 3, 2 / 3, 1])
 
 
-def mesh_faces(node: RNode, camera: Camera) -> list[RNode]:
+def mesh_faces(node: RNode, camera: CameraState) -> list[RNode]:
     """Path snapshots for the faces of a mesh node, from far to near."""
     mesh: RMesh = node.payload  # type: ignore[assignment]
     faces = np.asarray(mesh.faces)
@@ -43,7 +43,7 @@ def mesh_faces(node: RNode, camera: Camera) -> list[RNode]:
         colours = _lit(colours, corners, centers, mesh.gloss, mesh.shadow, camera)
     outlines = face_outlines(corners)
     end = ((outlines.shape[1] - 1) // 6) * 3
-    depth = centers @ camera._view_rotation()[2]
+    depth = centers @ camera.rotation[2]
     versions = node.versions
     face_versions = {
         "points": max(versions.get("points", 0), versions.get("faces", 0)),
@@ -133,14 +133,14 @@ def _lit(
     centers: np.ndarray,
     gloss: float,
     shadow: float,
-    camera: Camera,
+    camera: CameraState,
 ) -> np.ndarray:
     """Colours lit as the mesh shader lights them, at each face's center."""
     if corners.shape[1] >= 4:
         normals = np.cross(corners[:, 2] - corners[:, 0], corners[:, 3] - corners[:, 1])
     else:
         normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
-    rotation = camera._view_rotation()
+    rotation = camera.rotation
     normals = normals @ rotation.T
     lengths = np.linalg.norm(normals, axis=1, keepdims=True)
     normals = np.divide(
@@ -151,8 +151,8 @@ def _lit(
     )
     # Treated as two-sided: the normal faces the camera.
     normals[normals[:, 2] < 0] *= -1
-    points = (centers - np.asarray(camera.frame_center)) @ rotation.T
-    light = rotation @ camera._light_position()
+    points = (centers - camera.center) @ rotation.T
+    light = rotation @ camera.light
     to_camera = _unit(np.array([0.0, 0.0, 6.0]) - points)
     to_light = light - points
     along = np.sum(to_light * normals, axis=1, keepdims=True)

@@ -29,7 +29,9 @@ from manim import (
     config,
     tempconfig,
 )
+from manim.renderer import _view
 from manim.renderer.cairo import CairoRenderer
+from manim.renderer.snapshot import RPath
 from manim.utils.color import color_to_int_rgba
 
 
@@ -440,6 +442,25 @@ def test_mobjects_fixed_in_frame_stay_put_when_the_camera_moves():
             renderer.close()
 
 
+def _path_with(points):
+    no_color = np.zeros((1, 4))
+    return RPath(
+        points,
+        no_color,
+        no_color,
+        0.0,
+        no_color,
+        0.0,
+        None,
+        None,
+        None,
+        True,
+        None,
+        None,
+        1e-6,
+    )
+
+
 def test_3d_faces_are_shaded_like_3d_paths():
     from manim.renderer.cairo.mesh_faces import face_outlines
 
@@ -450,9 +471,11 @@ def test_3d_faces_are_shaded_like_3d_paths():
     outlines = face_outlines(corners)
     colours = np.random.default_rng(2).uniform(size=(30, 4))
 
-    shaded = camera._shade_faces(outlines, colours)
+    state = camera._state()
+    shaded = _view.shade_faces(state, outlines, colours)
 
     for outline, colour, ends in zip(outlines, colours, shaded, strict=True):
+        path = _path_with(outline)
         np.testing.assert_allclose(
-            ends, camera._shade(True, outline, colour[None]), rtol=1e-12
+            ends, _view.shaded_rgbas(state, path, colour[None]), rtol=1e-12
         )

@@ -18,11 +18,12 @@ from manim.typing import Point3D
 from manim.utils.color import color_to_rgba
 from manim.utils.iterables import list_update
 
-from ...camera import Camera, MultiCamera, ThreeDCamera
+from ...camera import Camera, MultiCamera
 from ...constants import *
 from ...scene.scene_file_writer import SceneFileWriter
+from .. import _view as _views
 from .._execution import _RendererExecutionView
-from ..protocol import RendererCapabilities
+from ..protocol import CameraState, RendererCapabilities
 from .drawing import DrawTarget, SnapshotDrawing
 from .shader import shader_program_cache
 from .window_settings import _WindowSettings
@@ -110,7 +111,7 @@ class OpenGLRenderer(_RendererExecutionView):
             camera if camera is not None else (camera_class or Camera)()
         )
         self.perspective_uniforms: dict[str, Any] = {}
-        self.camera_view: _CameraView = _CameraView.of(self.camera)
+        self.camera_view: _CameraView = _CameraView.of(self.camera._state())
         self._snapshot_drawing = SnapshotDrawing(self)
         self._camera_view_targets: dict[int, _ViewTarget] = {}
         self._static_layer: _StaticLayer | None = None
@@ -413,7 +414,8 @@ class OpenGLRenderer(_RendererExecutionView):
             msg = "Pixel shape is None, cannot refresh perspective uniforms."
             raise ValueError(msg)
         _, pixel_height = pixel_shape
-        view = self.camera_view = _CameraView.of(camera)
+        self._camera_state = camera._state()
+        view = self.camera_view = _CameraView.of(self._camera_state)
         self.perspective_uniforms = self.camera_uniforms(view, pixel_height)
 
     def camera_uniforms(self, view: _CameraView, pixel_height: int) -> dict[str, Any]:
@@ -435,7 +437,7 @@ class OpenGLRenderer(_RendererExecutionView):
         return DrawTarget(
             self.frame_buffer_object,
             pixel_shape,
-            self.camera,
+            self._camera_state,
             self.camera_view,
             self.perspective_uniforms,
         )
@@ -451,7 +453,9 @@ class OpenGLRenderer(_RendererExecutionView):
         views = self._draw_camera_views(mobjects)
         nodes = extract(mobjects, use_z_index=self.camera.use_z_index)
         self._snapshot_drawing.draw(
-            self.camera._sort_for_display(nodes), self._frame_target(), views
+            _views.sort_for_display(self._camera_state, nodes),
+            self._frame_target(),
+            views,
         )
 
     def _draw_camera_views(self, mobjects: list[Mobject]) -> dict[int, Any]:
@@ -484,11 +488,12 @@ class OpenGLRenderer(_RendererExecutionView):
                 view_target = _ViewTarget(self, size)
                 self._camera_view_targets[image_mobject.uid] = view_target
             camera = image_mobject.camera
-            view = _CameraView.of(camera)
+            state = camera._state()
+            view = _CameraView.of(state)
             target = DrawTarget(
                 view_target.framebuffer,
                 size,
-                camera,
+                state,
                 view,
                 self.camera_uniforms(view, size[1]),
             )
@@ -501,7 +506,7 @@ class OpenGLRenderer(_RendererExecutionView):
                 use_z_index=camera.use_z_index,
                 excluded_mobjects=[image_mobject],
             )
-            view_target.drawing.draw(camera._sort_for_display(nodes), target)
+            view_target.drawing.draw(_views.sort_for_display(state, nodes), target)
             textures[image_mobject.uid] = view_target.texture
         for uid in self._camera_view_targets.keys() - textures.keys():
             self._camera_view_targets.pop(uid).release()
@@ -567,7 +572,7 @@ class OpenGLRenderer(_RendererExecutionView):
         layer.framebuffer.clear(*self.background_color)
         nodes = extract(static, use_z_index=self.camera.use_z_index)
         layer.drawing.draw(
-            self.camera._sort_for_display(nodes),
+            _views.sort_for_display(self._camera_state, nodes),
             target._replace(framebuffer=layer.framebuffer),
         )
         layer.view = _view_key(target.view, target.size)
@@ -998,7 +1003,7 @@ class OpenGLRenderer(_RendererExecutionView):
         if pixel_shape is None:
             return typing.cast(Point3D, np.array([0.0, 0.0, 0.0]))
         pixel_width, pixel_height = pixel_shape
-        view = _CameraView.of(self.camera)
+        view = _CameraView.of(self.camera._state())
         frame_height = view.frame_shape[1]
         frame_center = view.center
         if relative:
@@ -1043,24 +1048,19 @@ class _CameraView(typing.NamedTuple):
     light_source: Point3D
 
     @classmethod
-    def of(cls, camera: Camera) -> _CameraView:
-        rotation = camera._view_rotation()
-        if isinstance(camera, ThreeDCamera):
-            camera._prepare_for_render()
-            zoom = camera.get_zoom()
-            return cls(
-                center=np.asarray(camera.frame_center, dtype=float),
-                rotation=rotation,
-                frame_shape=(camera.frame_width / zoom, camera.frame_height / zoom),
-                focal_distance=float(camera.get_focal_distance()),
-                light_source=camera._light_position(),
-            )
+    def of(cls, state: CameraState) -> _CameraView:
+        zoom = state.zoom
+        focal_distance = state.focal_distance
         return cls(
-            center=np.asarray(camera.frame_center, dtype=float),
-            rotation=rotation,
-            frame_shape=(camera.frame_width, camera.frame_height),
-            focal_distance=_ORTHOGRAPHIC_FOCAL_DISTANCE,
-            light_source=camera._light_position(),
+            center=state.center,
+            rotation=state.rotation,
+            frame_shape=(state.frame_width / zoom, state.frame_height / zoom),
+            focal_distance=(
+                _ORTHOGRAPHIC_FOCAL_DISTANCE
+                if focal_distance is None
+                else focal_distance
+            ),
+            light_source=state.light,
         )
 
 

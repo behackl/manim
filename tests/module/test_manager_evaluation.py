@@ -126,7 +126,7 @@ def test_unsupported_requests_raise(settings, demand):
     class Unsupported(Scene):
         def construct(self):
             if demand == "writer":
-                self.renderer.file_writer
+                self._get_manager().file_writer
             elif demand == "interactive":
                 self.interactive_embed()
             else:

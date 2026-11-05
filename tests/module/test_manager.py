@@ -41,7 +41,7 @@ def test_manager_exposes_the_session_output_snapshot(config):
     config.dry_run = True
 
     assert manager.output_spec.format is OutputFormat.GIF
-    assert manager.output_spec is scene.renderer.file_writer.output_spec
+    assert manager.output_spec is scene._get_manager().file_writer.output_spec
     assert manager.session_spec.presentation.open_after_render is True
     assert manager.session_spec.dry_run is False
 
@@ -258,7 +258,7 @@ def test_manager_render_finalizes_after_early_scene_end(dry_run):
 
 def test_scene_play_adds_subcaption_with_explicit_duration(dry_run, monkeypatch):
     scene = Scene()
-    file_writer = scene.renderer.file_writer
+    file_writer = scene._get_manager().file_writer
     scene.renderer.time = 2.5
     renderer_play = Mock(
         side_effect=lambda *args, **kwargs: setattr(scene.renderer, "time", 4.5)
@@ -314,7 +314,7 @@ def test_scene_play_uses_animation_duration_for_default_subcaption_after_skip(
     dry_run, monkeypatch
 ):
     scene = Scene()
-    file_writer = scene.renderer.file_writer
+    file_writer = scene._get_manager().file_writer
     scene.renderer.time = 1.0
     scene.renderer.skip_animations = True
     renderer_play = Mock(
@@ -340,7 +340,7 @@ def test_scene_play_queues_interactive_calls_without_attaching_manager(
     scene = Scene()
     scene.interactive_mode = True
     renderer_play = Mock()
-    monkeypatch.setattr(scene.renderer, "play", renderer_play)
+    monkeypatch.setattr(Manager, "play", renderer_play)
     worker_thread = threading.Thread(name="Worker")
     monkeypatch.setattr(threading, "current_thread", lambda: worker_thread)
 
@@ -380,7 +380,7 @@ def test_scene_next_section_records_metadata(dry_run):
 
 def test_scene_add_subcaption_records_placement(dry_run):
     scene = Scene()
-    file_writer = scene.renderer.file_writer
+    file_writer = scene._get_manager().file_writer
     scene.renderer.time = 2.5
 
     scene.add_subcaption("Hello", duration=1.5, offset=0.25)
@@ -398,7 +398,7 @@ def test_scene_add_subcaption_records_placement(dry_run):
 
 def test_scene_add_sound_passes_placement_to_the_writer(dry_run, monkeypatch):
     scene = Scene()
-    file_writer = scene.renderer.file_writer
+    file_writer = scene._get_manager().file_writer
     monkeypatch.setattr(file_writer, "add_sound", Mock())
     scene.renderer.time = 2.5
 

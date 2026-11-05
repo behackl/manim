@@ -18,7 +18,6 @@ from manim.utils.iterables import list_update
 
 from ...camera import Camera
 from ...constants import *
-from ...scene.scene_file_writer import SceneFileWriter
 from .. import _view as _views
 from .._execution import _RendererExecutionView
 from ..frame import FrameBuilder
@@ -31,8 +30,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
     from manim._config.render_session import RenderSessionSpec
-    from manim.animation.animation import Animation
-    from manim.mobject.mobject import Mobject, _AnimationBuilder
     from manim.scene.scene import Scene
     from manim.typing import (
         RGBAPixelArray,
@@ -122,6 +119,8 @@ class OpenGLRenderer(_RendererExecutionView):
         self._keep_image_renderer = False
         self._image_renderer: OpenGLRenderer | None = None
         self._closed = False
+        #: Whether a scene draws with this renderer (one scene per renderer).
+        self._scene_bound = False
         self._retiring = False
         self._resources = contextlib.ExitStack()
         self._previous_renderer: weakref.ReferenceType[OpenGLRenderer] | None = None
@@ -359,11 +358,6 @@ class OpenGLRenderer(_RendererExecutionView):
         ):
             prior.open()
 
-    @property
-    def file_writer(self) -> SceneFileWriter:
-        """Return the scene manager's file writer, creating it if needed."""
-        return self.scene._get_manager().file_writer
-
     def should_create_window(self, session_spec: RenderSessionSpec) -> bool:
         """Return whether the scene's saved settings request a live-preview window."""
         return session_spec.presentation.live_preview
@@ -494,38 +488,6 @@ class OpenGLRenderer(_RendererExecutionView):
     def pixel_size(self) -> tuple[int, int]:
         """The width and height in pixels of frames drawn for a scene."""
         return self._pixel_size
-
-    def update_skipping_status(self) -> None:
-        """Ask the scene's manager whether this play should be fast-forwarded.
-
-        Raises
-        ------
-        EndSceneEarlyException
-            If the number of played animations exceeds the configured upper bound.
-        """
-        self.scene._get_manager()._update_skipping_status()
-
-    def play(
-        self,
-        scene: Scene,
-        *animations: Animation | Mobject | _AnimationBuilder,
-        **kwargs: Any,
-    ) -> None:
-        """Delegate animation playback to the scene's manager.
-
-        Prefer :meth:`.Scene.play` for new code; it also handles subcaptions and
-        calls made from another thread during OpenGL interaction.
-
-        Parameters
-        ----------
-        scene
-            The scene in which to play the animations.
-        animations
-            The animations, mobjects, or animation builders to play.
-        kwargs
-            Animation options such as ``run_time`` and ``rate_func``.
-        """
-        scene._get_manager().play(*animations, **kwargs)
 
     def _animation_cache_identity(self, scene: Scene) -> tuple[str, Any]:
         return "opengl", {

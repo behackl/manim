@@ -53,7 +53,6 @@ if TYPE_CHECKING:
     from .renderer.snapshot import RNode
     from .scene.scene import Scene
     from .timeline import Timeline
-    from .typing import RGBAPixelArray
 
 __all__ = ["Manager", "RenderedFrame"]
 
@@ -273,9 +272,8 @@ class Manager(Generic[SceneT]):
         """The scene's file writer, created on first access.
 
         The writer uses ``scene.file_writer_settings``. :meth:`render` accesses
-        this property before calling :meth:`setup`; ``renderer.file_writer``
-        returns the same writer. Both properties are read-only. Accessing this
-        property during :meth:`evaluate` raises ``RuntimeError``.
+        this property before calling :meth:`setup`. It is read-only. Accessing
+        this property during :meth:`evaluate` raises ``RuntimeError``.
         """
         self._ensure_not_evaluating("Media output")
         if self._file_writer is None:
@@ -768,16 +766,6 @@ class Manager(Generic[SceneT]):
         loop = self._loop
         loop.listeners = (*loop.listeners, listener)
 
-    def _update_skipping_status(self) -> None:
-        """Set :attr:`skip_animations` for the next play, for old renderer callers.
-
-        Raises
-        ------
-        EndSceneEarlyException
-            If the next play lies after ``config.upto_animation_number``.
-        """
-        self.skip_animations = not self._loop.selection.start_play(self.num_plays)
-
     def _play(
         self, *args: Animation | Mobject | _AnimationBuilder, **kwargs: Any
     ) -> None:
@@ -813,28 +801,6 @@ class Manager(Generic[SceneT]):
         if self._wants_frame_pixels:
             self.file_writer.write_frame(self.renderer.get_frame())
         self.renderer._present_frame(scene, frame_offset)
-
-    def _legacy_add_frame(
-        self, frame: RGBAPixelArray | None, num_frames: int = 1
-    ) -> None:
-        """Write frames and advance time for callers of CairoRenderer.add_frame.
-
-        Like a play, the frames advance the clock whether or not they are part
-        of the output, so that scene time does not depend on the cache. Only
-        plays mark scene time as shown in the movie: frames added during a play
-        lie in its span, and frames added between plays are not written to a
-        movie, which has no open segment then. During evaluation, which writes
-        no media, the frames go to the evaluation's listeners; ``frame`` can then
-        be None for the scene's current state.
-        """
-        self._validate_execution()
-        if self._evaluating:
-            self._loop.add_frames(frame, num_frames)
-            return
-        assert frame is not None
-        self._execution.frame += num_frames
-        if not self.skip_animations:
-            self.file_writer.write_frame(frame, repeat=num_frames)
 
     def next_section(
         self,

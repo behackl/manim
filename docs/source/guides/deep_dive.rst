@@ -288,10 +288,6 @@ continues as follows:
         max_files_cached=config.max_files_cached,
         assets_dir=...,
     )
-    self.renderer.init_scene(
-        self,
-        self.session_spec,
-    )
 
 The session specification separates *primary artifact* intent (an ``OutputSpec``
 which defines the type of file we wish Manim to create based on our scene) from
@@ -324,9 +320,8 @@ a name rather than overriding that format.
 The scene stores the output plan, video encoding settings, cache limits, and
 sound-asset directory in ``_SceneFileWriterSettings``. The :class:`.Manager` uses
 these settings to create a :class:`.SceneFileWriter` when rendering starts, before
-``setup()``. Accessing ``manager.file_writer`` or ``renderer.file_writer`` also
-creates this writer if needed. Both properties return the same writer for the
-rest of the scene.
+``setup()``. Accessing ``manager.file_writer`` also creates this writer if
+needed; it is the same writer for the rest of the scene.
 
 The writer uses the saved settings to encode and assemble media through ``libav``.
 It creates directories as it writes files. A snapshot from ``scene.get_image()``

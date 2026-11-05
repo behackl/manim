@@ -9,9 +9,7 @@ from PIL import Image
 from manim.camera import Camera
 
 from ..._config import config
-from ..._run.frames import frame_count
-from ...mobject.mobject import Mobject, _AnimationBuilder
-from ...scene.scene_file_writer import SceneFileWriter
+from ...mobject.mobject import Mobject
 from ...utils.iterables import list_update
 from .. import _view
 from .._execution import _RendererExecutionView
@@ -24,8 +22,6 @@ from .rendering import _CairoDrawingContext, reusable_boundary
 from .target import _CairoRasterSettings, _CairoRenderTarget
 
 if TYPE_CHECKING:
-    from manim._config.render_session import RenderSessionSpec
-    from manim.animation.animation import Animation
     from manim.scene.scene import Scene
 
     from ...typing import RGBAPixelArray
@@ -72,6 +68,8 @@ class CairoRenderer(_RendererExecutionView):
         self._memo = PrefixMemo()
         self._saved_pixels: RGBAPixelArray | None = None
         self._closed = False
+        #: Whether a scene draws with this renderer (one scene per renderer).
+        self._scene_bound = False
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -88,30 +86,6 @@ class CairoRenderer(_RendererExecutionView):
         """The width and height in pixels of frames drawn for a scene."""
         settings = self._raster_settings
         return settings.pixel_width, settings.pixel_height
-
-    def init_scene(
-        self,
-        scene: Scene,
-        session_spec: RenderSessionSpec,
-    ) -> None:
-        self._ensure_open()
-        if hasattr(self, "_scene"):
-            raise RuntimeError("This renderer is already bound to a Scene.")
-        self._scene = scene
-
-    @property
-    def file_writer(self) -> SceneFileWriter:
-        """Return the scene manager's file writer, creating it if needed."""
-        return self._scene._get_manager().file_writer
-
-    def play(
-        self,
-        scene: Scene,
-        *args: Animation | Mobject | _AnimationBuilder,
-        **kwargs: Any,
-    ) -> None:
-        """Delegate playback to the scene's manager; prefer Scene.play for new code."""
-        scene._get_manager().play(*args, **kwargs)
 
     def _animation_cache_identity(self, scene: Scene) -> tuple[str, Any]:
         return "cairo", ()
@@ -314,26 +288,6 @@ class CairoRenderer(_RendererExecutionView):
     def get_image(self) -> Image.Image:
         """Return the current target as a PIL image."""
         return Image.fromarray(self.get_frame())
-
-    def add_frame(self, frame: RGBAPixelArray, num_frames: int = 1) -> None:
-        self._ensure_open()
-        self._scene._get_manager()._legacy_add_frame(frame, num_frames)
-
-    def freeze_current_frame(self, duration: float) -> None:
-        self._ensure_open()
-        manager = self._scene._get_manager()
-        # Evaluation draws frames only when they are requested, without a target.
-        manager._legacy_add_frame(
-            None if manager._evaluating else self.get_frame(),
-            frame_count(duration, self._scene.session_spec.frame_rate),
-        )
-
-    def show_frame(self, scene: Scene) -> None:
-        self.update_frame(scene, ignore_skipping=True)
-        self.get_image().show()
-
-    def update_skipping_status(self) -> None:
-        self._scene._get_manager()._update_skipping_status()
 
     def open(self) -> None:
         """Check that the renderer can draw.

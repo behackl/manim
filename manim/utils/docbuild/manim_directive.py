@@ -309,7 +309,7 @@ class ManimDirective(Directive):
                     number=1,
                 )
                 rendered_scene = render_namespace.pop("_manim_rendered_scene")
-                filesrc = rendered_scene.renderer.file_writer.final_file_path
+                filesrc = rendered_scene._get_manager().file_writer.final_file_path
         except Exception as e:
             render_namespace.pop("_manim_rendered_scene", None)
             raise RuntimeError(f"Error while rendering example {clsname}") from e

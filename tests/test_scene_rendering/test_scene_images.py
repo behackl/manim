@@ -37,7 +37,7 @@ def test_fresh_image_without_evaluation(image_scene, monkeypatch):
         pytest.fail("Image inspection must not execute or emit movie frames")
 
     monkeypatch.setattr(scene, "construct", unexpected)
-    monkeypatch.setattr(scene.renderer.file_writer, "write_frame", unexpected)
+    monkeypatch.setattr(scene._get_manager().file_writer, "write_frame", unexpected)
     scene.renderer.update_frame(scene)
     old = scene.renderer.get_frame()
     square.shift(3 * RIGHT)

@@ -136,6 +136,11 @@ class Mobject:
     #: ``None``, or the function giving the point the mobject keeps facing the camera
     #: from (see :meth:`fix_orientation`).
     fixed_orientation: Field[Callable[[], Point3D] | None] = Field()
+    #: Whether a snapshot of the mobject is a function of its fields (and those of
+    #: :meth:`drawn_with`). ``False`` for classes that compute what they draw from
+    #: other state, such as images generated on request; their snapshots are taken
+    #: anew for every frame.
+    _drawn_from_fields: ClassVar[bool] = True
     # uid depends on construction order; versions and checksums on edit history.
     _hash_excluded_attributes = frozenset(
         {"uid", "_field_versions", "_field_checksums"}

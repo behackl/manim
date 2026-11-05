@@ -13,7 +13,7 @@ from moderngl import Framebuffer
 from PIL import Image
 
 from manim._config import config, logger
-from manim.renderer.snapshot import extract
+from manim.renderer.snapshot import Extractor
 from manim.typing import Point3D
 from manim.utils.iterables import list_update
 
@@ -108,6 +108,7 @@ class OpenGLRenderer(_RendererExecutionView):
         self.perspective_uniforms: dict[str, Any] = {}
         self.camera_view: _CameraView = _CameraView.of(self.camera._state())
         self._snapshot_drawing = SnapshotDrawing(self)
+        self._extractor = Extractor()
         self._camera_view_targets: dict[int, _ViewTarget] = {}
         self.pressed_keys: set[int] = set()
         self.window: Window | None = None
@@ -445,7 +446,7 @@ class OpenGLRenderer(_RendererExecutionView):
         if mobjects is None:
             mobjects = list_update(scene.mobjects, scene.foreground_mobjects)
         views = self._draw_camera_views(mobjects)
-        nodes = extract(mobjects, use_z_index=self.camera.use_z_index)
+        nodes = self._extractor.extract(mobjects, use_z_index=self.camera.use_z_index)
         self._snapshot_drawing.draw(
             _views.sort_for_display(self._camera_state, nodes),
             self._frame_target(),
@@ -494,7 +495,7 @@ class OpenGLRenderer(_RendererExecutionView):
             )
             view_target.framebuffer.use()
             view_target.framebuffer.clear(*_background_rgba(camera))
-            nodes = extract(
+            nodes = self._extractor.extract(
                 mobjects,
                 use_z_index=camera.use_z_index,
                 excluded_mobjects=[image_mobject],

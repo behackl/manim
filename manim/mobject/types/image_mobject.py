@@ -63,6 +63,8 @@ class AbstractImageMobject(Mobject):
     """
 
     resampling_algorithm: Field[Resampling] = Field()
+    # Subclasses compute their pixels in get_pixel_array().
+    _drawn_from_fields = False
 
     def __init__(
         self,
@@ -186,6 +188,8 @@ class ImageMobject(AbstractImageMobject):
                 group.arrange()
                 self.add(group)
     """
+
+    _drawn_from_fields = True
 
     pixel_array: ArrayField[PixelArray] = ArrayField()
 
@@ -324,6 +328,9 @@ class ImageMobjectFromCamera(Mobject):
     The mobject describes where a secondary camera view is composited. It owns
     geometry and sampling settings, but it never exposes or stores raster pixels.
     """
+
+    # Shows what another camera sees.
+    _drawn_from_fields = False
 
     def __init__(
         self,

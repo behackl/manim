@@ -35,6 +35,7 @@ from .target import _CairoRenderTarget, _PathCache
 
 if TYPE_CHECKING:
     from manim.renderer.protocol import CameraState
+    from manim.renderer.snapshot import Extractor
     from manim.typing import (
         FloatRGBA_Array,
         FloatRGBALike_Array,
@@ -71,9 +72,11 @@ class _CairoDrawingContext:
         target: _CairoRenderTarget,
         image_resolver: _ImageResolver,
         use_z_index: bool = True,
+        extractor: Extractor | None = None,
     ) -> None:
         self.camera = camera
         self.use_z_index = use_z_index
+        self.extractor = extractor
         self.target = target
         self.image_resolver = image_resolver
         self._path_cache: _PathCache | None = None
@@ -89,7 +92,8 @@ class _CairoDrawingContext:
         their faces, sorted by depth for a perspective view.
         """
         nodes = []
-        for node in extract(
+        take = extract if self.extractor is None else self.extractor.extract
+        for node in take(
             mobjects,
             include_submobjects=include_submobjects,
             use_z_index=self.use_z_index,

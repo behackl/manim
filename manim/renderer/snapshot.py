@@ -11,12 +11,14 @@ Payload arrays are the mobjects' field values, not copies; they are read-only wh
 
 from __future__ import annotations
 
+import weakref
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 
-from manim.mobject.fields import check_in_place_modifications
+from manim.mobject import fields
+from manim.mobject.fields import check_in_place_modifications, field_version
 from manim.mobject.mobject import Mobject
 from manim.mobject.three_d.mesh import MeshMobject
 from manim.mobject.types.image_mobject import (
@@ -34,7 +36,17 @@ if TYPE_CHECKING:
     from manim.constants import CapStyleType, LineJointType
     from manim.typing import FloatRGBA_Array, PixelArray, Point3D, Point3D_Array
 
-__all__ = ["RCameraView", "RImage", "RMesh", "RNode", "RPath", "RPoints", "extract"]
+__all__ = [
+    "Extractor",
+    "RCameraView",
+    "RImage",
+    "RMesh",
+    "RNode",
+    "RPath",
+    "RPoints",
+    "extract",
+    "snapshot",
+]
 
 #: Transform of every node while mobjects store their points in scene coordinates.
 IDENTITY = np.eye(4)
@@ -162,49 +174,181 @@ def extract(
     left out. With ``include_submobjects=False``, ``mobjects`` are taken as given.
     Plain :class:`~.Mobject` instances are always left out; they have nothing to draw.
 
+    Every snapshot is taken anew; an :class:`Extractor` reuses those of unchanged
+    mobjects.
+
     Raises
     ------
     TypeError
         If a mobject is of a type no renderer can draw.
     """
-    if not include_submobjects:
-        members = list(mobjects)
-    else:
-        members = extract_mobject_family_members(
-            mobjects, use_z_index=use_z_index, only_those_with_points=True
-        )
-        excluded = list(excluded_mobjects)
-        if excluded:
-            members = list_difference_update(
-                members,
-                extract_mobject_family_members(excluded, use_z_index=use_z_index),
-            )
     nodes = []
-    for mobject in members:
-        payload = _payload(mobject)
-        if payload is None:
-            continue
-        nodes.append(
-            RNode(
-                uid=mobject.uid,
-                transform=IDENTITY,
-                z_index=mobject.z_index,
-                versions=_versions(mobject, _ARRAYS[type(payload)]),
-                payload=payload,
-                fixed_in_frame=mobject.fixed_in_frame,
-                fixed_orientation_center=(
-                    None
-                    if mobject.fixed_orientation is None
-                    else np.asarray(mobject.fixed_orientation(), dtype=float)
-                ),
-            )
-        )
+    for mobject in _members(
+        mobjects, include_submobjects, use_z_index, excluded_mobjects
+    ):
+        check_in_place_modifications(mobject, _arrays_of(mobject))
+        node = snapshot(mobject)
+        if node is not None:
+            nodes.append(node)
     return nodes
 
 
-def _versions(mobject: Mobject, arrays: tuple[str, ...]) -> dict[str, int]:
-    check_in_place_modifications(mobject, arrays)
-    return dict(mobject.__dict__.get("_field_versions", ()))
+class Extractor:
+    """Takes render snapshots like :func:`extract`, reusing the snapshot of a
+    mobject while its fields, and the points of the family it is
+    :meth:`~.Mobject.drawn_with`, keep their versions.
+
+    This relies on one rule: a snapshot is a function of those fields. Classes
+    that draw from other state set ``_drawn_from_fields = False``, and mobjects
+    with a fixed orientation call their center function; both are taken anew every
+    time. In strict field mode (:mod:`manim.mobject.fields`), every
+    reused snapshot is compared with a fresh one, so a class that breaks the rule
+    fails loudly instead of showing stale pixels.
+
+    Whoever draws frames owns an extractor; it holds the mobjects it saw weakly.
+    """
+
+    def __init__(self) -> None:
+        self._snapshots: weakref.WeakKeyDictionary[
+            Mobject, tuple[tuple[Any, ...], RNode | None]
+        ] = weakref.WeakKeyDictionary()
+
+    def extract(
+        self,
+        mobjects: Iterable[Mobject],
+        *,
+        include_submobjects: bool = True,
+        use_z_index: bool = True,
+        excluded_mobjects: Iterable[Mobject] = (),
+    ) -> list[RNode]:
+        """Snapshots as :func:`extract` returns them."""
+        nodes = []
+        snapshots = self._snapshots
+        # Versions of the groups mobjects are drawn with, once per call.
+        groups: dict[int, tuple[Any, ...]] = {}
+        for mobject in _members(
+            mobjects, include_submobjects, use_z_index, excluded_mobjects
+        ):
+            check_in_place_modifications(mobject, _arrays_of(mobject))
+            # The orientation center comes from a function, called every time.
+            if not mobject._drawn_from_fields or mobject.fixed_orientation is not None:
+                node = snapshot(mobject)
+            else:
+                key = _version_key(mobject, groups)
+                cached = snapshots.get(mobject)
+                if cached is not None and cached[0] == key:
+                    node = cached[1]
+                    if fields.STRICT:
+                        _check_unchanged(mobject, node)
+                else:
+                    node = snapshot(mobject)
+                    snapshots[mobject] = (key, node)
+            if node is not None:
+                nodes.append(node)
+        return nodes
+
+
+def snapshot(mobject: Mobject) -> RNode | None:
+    """The render snapshot of ``mobject`` alone, or ``None`` if it draws nothing."""
+    payload = _payload(mobject)
+    if payload is None:
+        return None
+    return RNode(
+        uid=mobject.uid,
+        transform=IDENTITY,
+        z_index=mobject.z_index,
+        versions=dict(mobject.__dict__.get("_field_versions", ())),
+        payload=payload,
+        fixed_in_frame=mobject.fixed_in_frame,
+        fixed_orientation_center=(
+            None
+            if mobject.fixed_orientation is None
+            else np.asarray(mobject.fixed_orientation(), dtype=float)
+        ),
+    )
+
+
+def _members(
+    mobjects: Iterable[Mobject],
+    include_submobjects: bool,
+    use_z_index: bool,
+    excluded_mobjects: Iterable[Mobject],
+) -> list[Mobject]:
+    if not include_submobjects:
+        return list(mobjects)
+    members = extract_mobject_family_members(
+        mobjects, use_z_index=use_z_index, only_those_with_points=True
+    )
+    excluded = list(excluded_mobjects)
+    if excluded:
+        members = list_difference_update(
+            members,
+            extract_mobject_family_members(excluded, use_z_index=use_z_index),
+        )
+    return members
+
+
+def _version_key(
+    mobject: Mobject, groups: dict[int, tuple[Any, ...]]
+) -> tuple[Any, ...]:
+    """Equal while no field of ``mobject``, and no points of its
+    :meth:`~.Mobject.drawn_with` family, are assigned.
+
+    Versions come from one counter that only goes up, so a mobject's versions
+    change exactly when their largest one or their number does. ``groups`` holds
+    the keys of the groups seen in this call: the members of a group share them.
+    """
+    versions = mobject.__dict__.get("_field_versions")
+    key: tuple[Any, ...] = (
+        (max(versions.values()), len(versions)) if versions else (0, 0)
+    )
+    group = mobject.drawn_with()
+    if group is None:
+        return key
+    group_key = groups.get(id(group))
+    if group_key is None:
+        group_key = groups[id(group)] = tuple(
+            (id(member), field_version(member, "points"))
+            for member in group.get_family()
+        )
+    return (*key, group_key)
+
+
+def _check_unchanged(mobject: Mobject, node: RNode | None) -> None:
+    if not _same(node, snapshot(mobject)):
+        raise AssertionError(
+            f"The render snapshot of {mobject!r} changed although none of the "
+            "fields it is drawn from did. Draw it from fields, return the mobject "
+            "it also depends on from drawn_with(), or set "
+            f"{type(mobject).__name__}._drawn_from_fields = False."
+        )
+
+
+def _same(a: Any, b: Any) -> bool:
+    if a is b:
+        return True
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        return bool(np.array_equal(a, b))
+    if isinstance(a, tuple) and isinstance(b, tuple):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
+    if isinstance(a, Mapping) and isinstance(b, Mapping):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    return bool(a == b)
+
+
+def _arrays_of(mobject: Mobject) -> tuple[str, ...]:
+    """The array fields that snapshots of ``mobject`` are drawn from."""
+    if isinstance(mobject, VMobject):
+        return _ARRAYS[RPath]
+    if isinstance(mobject, PMobject):
+        return _ARRAYS[RPoints]
+    if isinstance(mobject, AbstractImageMobject):
+        return _ARRAYS[RImage]
+    if isinstance(mobject, ImageMobjectFromCamera):
+        return _ARRAYS[RCameraView]
+    if isinstance(mobject, MeshMobject):
+        return _ARRAYS[RMesh]
+    return ()
 
 
 def _payload(mobject: Mobject) -> Payload | None:

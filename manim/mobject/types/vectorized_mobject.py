@@ -173,6 +173,9 @@ class VMobject(Mobject):
     cap_style: Field[CapStyleType] = Field()
     shade_in_3d: Field[bool] = Field()
     background_image: Field[Image | str | None] = Field()
+    tolerance_for_point_equality: Field[float] = Field()
+    gradient_group: Field[Mobject | None] = Field()
+    gradient_direction: ArrayField[Vector3D] = ArrayField(np.float64)
     target: VMobject
 
     def __init__(

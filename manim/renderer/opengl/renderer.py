@@ -15,7 +15,6 @@ from PIL import Image
 from manim._config import config, logger
 from manim.renderer.snapshot import extract
 from manim.typing import Point3D
-from manim.utils.color import color_to_rgba
 from manim.utils.iterables import list_update
 
 from ...camera import Camera, MultiCamera
@@ -36,10 +35,8 @@ if TYPE_CHECKING:
     from manim.mobject.mobject import Mobject, _AnimationBuilder
     from manim.scene.scene import Scene
     from manim.typing import (
-        FloatRGBA,
         RGBAPixelArray,
     )
-    from manim.utils.color.core import ParsableManimColor
 
     from .window import Window
 
@@ -63,8 +60,6 @@ class OpenGLRenderer(_RendererExecutionView):
         List of animation hashes for caching.
     anti_alias_width : float
         The width used for anti-aliasing in pixel units.
-    background_color : FloatRGBA
-        The background color of the renderer.
     camera : Camera
         The camera used for rendering: the same camera classes as the Cairo renderer.
     num_plays : float
@@ -118,7 +113,6 @@ class OpenGLRenderer(_RendererExecutionView):
         self._moving_mobjects: list[Mobject] | None = None
         self.pressed_keys: set[int] = set()
         self.window: Window | None = None
-        self.background_color = config["background_color"]
         self._context: moderngl.Context | None = None
         self._frame_buffer_object: Framebuffer | None = None
         self._context_thread: int | None = None
@@ -156,7 +150,6 @@ class OpenGLRenderer(_RendererExecutionView):
         self.partial_movie_files: list[str | None] = []
         self.scene = scene
 
-        self.background_color = config["background_color"]
         self._pixel_size = (int(config.pixel_width), int(config.pixel_height))
         self._wireframe = config.enable_wireframe
         self._window_settings = (
@@ -431,6 +424,9 @@ class OpenGLRenderer(_RendererExecutionView):
             "focal_distance": view.focal_distance,
         }
 
+    def _background_rgba(self) -> tuple[float, float, float, float]:
+        return _background_rgba(self.camera)
+
     def _frame_target(self) -> DrawTarget:
         pixel_shape = self.get_pixel_shape()
         assert pixel_shape is not None
@@ -498,9 +494,7 @@ class OpenGLRenderer(_RendererExecutionView):
                 self.camera_uniforms(view, size[1]),
             )
             view_target.framebuffer.use()
-            view_target.framebuffer.clear(
-                *camera.background_color.to_rgb(), camera.background_opacity
-            )
+            view_target.framebuffer.clear(*_background_rgba(camera))
             nodes = extract(
                 mobjects,
                 use_z_index=camera.use_z_index,
@@ -546,7 +540,6 @@ class OpenGLRenderer(_RendererExecutionView):
 
     def _animation_cache_identity(self, scene: Scene) -> tuple[str, Any]:
         return "opengl", {
-            "background_color": self.background_color,
             "anti_alias_width": self.anti_alias_width,
         }
 
@@ -569,7 +562,7 @@ class OpenGLRenderer(_RendererExecutionView):
         self.refresh_perspective_uniforms(self.camera)
         target = self._frame_target()
         layer = _StaticLayer(self, target.size)
-        layer.framebuffer.clear(*self.background_color)
+        layer.framebuffer.clear(*self._background_rgba())
         nodes = extract(static, use_z_index=self.camera.use_z_index)
         layer.drawing.draw(
             _views.sort_for_display(self._camera_state, nodes),
@@ -604,10 +597,9 @@ class OpenGLRenderer(_RendererExecutionView):
         Clears the current frame buffer and updates the display window
         accordingly.
 
-        The screen is cleared using the background color specified
-        in the renderer.
+        The screen is cleared using the camera's background color.
         """
-        self.frame_buffer_object.clear(*self.background_color)
+        self.frame_buffer_object.clear(*self._background_rgba())
         if self.window is None:
             return
         self.window.swap_buffers()
@@ -678,7 +670,7 @@ class OpenGLRenderer(_RendererExecutionView):
             self.context.copy_framebuffer(target.framebuffer, static.framebuffer)
             self._draw_snapshots(scene, self._moving_mobjects)
         else:
-            self.frame_buffer_object.clear(*self.background_color)
+            self.frame_buffer_object.clear(*self._background_rgba())
             self._draw_snapshots(scene)
 
     @contextlib.contextmanager
@@ -717,7 +709,6 @@ class OpenGLRenderer(_RendererExecutionView):
             temporary = kept if kept is not None else OpenGLRenderer()
             temporary.scene = scene
             temporary.camera = self.camera
-            temporary._background_color = self._background_color.copy()
             temporary._pixel_size = self._pixel_size
             temporary._wireframe = self._wireframe
             temporary._window_settings = None
@@ -1022,15 +1013,6 @@ class OpenGLRenderer(_RendererExecutionView):
             ),
         )
 
-    @property
-    def background_color(self) -> FloatRGBA:
-        """The background color of the renderer (RGBA format)."""
-        return self._background_color
-
-    @background_color.setter
-    def background_color(self, value: ParsableManimColor) -> None:
-        self._background_color = color_to_rgba(value, 1.0)
-
 
 #: Focal distance standing in for "no perspective" (a camera without rotation).
 _ORTHOGRAPHIC_FOCAL_DISTANCE = 1e6
@@ -1114,3 +1096,9 @@ class _ViewTarget:
         for resource in (self.framebuffer, self.texture):
             if not isinstance(resource.mglo, moderngl.InvalidObject):
                 resource.release()
+
+
+def _background_rgba(camera: Camera) -> tuple[float, float, float, float]:
+    """The camera's background, as the framebuffer is cleared to it."""
+    r, g, b = camera.background_color.to_rgb()
+    return float(r), float(g), float(b), float(camera.background_opacity)

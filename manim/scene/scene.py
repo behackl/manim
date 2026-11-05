@@ -220,9 +220,7 @@ class Scene:
                 renderer = OpenGLRenderer()
 
         if renderer is None:
-            self._renderer: CairoRenderer | OpenGLRenderer = CairoRenderer(
-                skip_animations=self.skip_animations,
-            )
+            self._renderer: CairoRenderer | OpenGLRenderer = CairoRenderer()
         else:
             self._renderer = renderer
         # Until the Manager hands renderers what to draw, they read the camera.
@@ -309,8 +307,7 @@ class Scene:
     @property
     def time(self) -> float:
         """Elapsed animation time in seconds, as reported by the scene's manager."""
-        # The renderer reads the clock of the scene's manager once there is one.
-        return self.renderer.time
+        return self._get_manager().time
 
     def __deepcopy__(self, clone_from_id: dict[int, Any]) -> Scene:
         cls = self.__class__
@@ -1004,14 +1001,14 @@ class Scene:
             else:
                 time_progression = self.get_time_progression(
                     duration,
-                    f"Waiting {self.renderer.num_plays}",
+                    f"Waiting {self._get_manager().num_plays}",
                 )
         else:
             time_progression = self.get_time_progression(
                 duration,
                 "".join(
                     [
-                        f"Animation {self.renderer.num_plays}: ",
+                        f"Animation {self._get_manager().num_plays}: ",
                         str(animations[0]),
                         (", etc." if len(animations) > 1 else ""),
                     ],
@@ -1052,7 +1049,7 @@ class Scene:
         time_progression
             The CommandLine Progress Bar.
         """
-        if self.renderer.skip_animations and not override_skip_animations:
+        if self._get_manager().skip_animations and not override_skip_animations:
             times: Iterable[float] = [run_time]
         else:
             rate = config["frame_rate"]

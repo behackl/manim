@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from PIL import Image as PILImage
+
 from ._config import config, logger
 from ._config.logger_utils import set_file_logger
 from ._run.listeners import (
@@ -26,6 +28,7 @@ from ._run.loop import (
 )
 from ._run.record import _RunRecord
 from ._run.selection import _OutputSelection
+from ._run.state import _ExecutionState
 from .renderer.cairo.renderer import CairoRenderer
 from .renderer.frame import FrameBuilder
 from .scene.scene_file_writer import SceneFileWriter
@@ -132,7 +135,10 @@ class Manager(Generic[SceneT]):
         if scene.manager is not None:
             raise ValueError("A manager is already attached to this scene.")
         self.scene = scene
-        self._execution = scene.renderer._claim_execution(self)
+        self._execution = _ExecutionState(
+            skip_animations=scene.skip_animations,
+            original_skipping_status=scene.skip_animations,
+        )
         self._file_writer: SceneFileWriter | None = None
         self._creating_file_writer = False
         self._log_handler: FileHandler | None = None
@@ -317,6 +323,13 @@ class Manager(Generic[SceneT]):
     @num_plays.setter
     def num_plays(self, value: int) -> None:
         self._execution.num_plays = value
+
+    @property
+    def animations_hashes(self) -> list[str | None]:
+        """The cache key of each play so far; ``None`` for plays left out of the
+        output.
+        """
+        return self._execution.animations_hashes
 
     @property
     def skip_animations(self) -> bool:
@@ -564,7 +577,7 @@ class Manager(Generic[SceneT]):
 
     def get_image(self) -> Image:
         """Draw a fresh scene image; see :meth:`.Scene.get_image` for snapshot behavior."""
-        return self.renderer._get_scene_image(self.scene)
+        return PILImage.fromarray(self.renderer._image(*self._frame()))
 
     def _frame(self) -> tuple[list[RNode], RenderConfig]:
         """The snapshots and configuration of a frame of the scene's current state."""
@@ -794,13 +807,12 @@ class Manager(Generic[SceneT]):
         play is skipped, the frame is also passed to the file writer.
         """
         self._validate_execution()
-        scene = self.scene
-        self.renderer.render_scene(scene, frame_offset)
+        pixels = self.renderer.render(*self._frame())
         if self.skip_animations:
             return
         if self._wants_frame_pixels:
-            self.file_writer.write_frame(self.renderer.get_frame())
-        self.renderer._present_frame(scene, frame_offset)
+            self.file_writer.write_frame(pixels)
+        self.renderer._present_frame(self.scene, frame_offset)
 
     def next_section(
         self,

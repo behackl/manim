@@ -11,7 +11,7 @@ from manim import (
     tempconfig,
 )
 
-RASTER_CALLS = ("render", "get_frame", "_start_animation", "_present_frozen_frame")
+RASTER_CALLS = ("render", "_image", "_start_animation", "_present_frozen_frame")
 
 
 @pytest.fixture(params=["cairo", "opengl"])
@@ -84,7 +84,9 @@ def test_cached_plays_do_no_raster_work(settings, monkeypatch):
         counters = spy_on_raster(monkeypatch, warm.renderer)
         warm.render()
 
-    assert warm.renderer.animations_hashes == cold.renderer.animations_hashes
+    assert (
+        warm._get_manager().animations_hashes == cold._get_manager().animations_hashes
+    )
     assert warm.time == cold.time
     assert total_calls(counters) == 0
 

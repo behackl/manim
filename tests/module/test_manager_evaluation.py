@@ -85,7 +85,7 @@ def test_real_evaluation_matches_uncached_render(settings, monkeypatch):
             "upto_animation_number": 0,
         }
     ):
-        evaluated.renderer._original_skipping_status = True
+        evaluated._get_manager()._execution.original_skipping_status = True
         manager.evaluate()
     assert evaluated.trace == rendered.trace
     assert evaluated.time == rendered.time == 1.5

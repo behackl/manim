@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
-import numpy as np
-
 from .frames import frame_count
 
 if TYPE_CHECKING:
@@ -179,8 +177,8 @@ class _SceneImageDrawer:
         self._pixels: RGBAPixelArray | None = None
 
     def draw(self, frame: _Frame) -> None:
-        image = self._manager.renderer._get_scene_image(self._manager.scene)
-        self._pixels = np.asarray(image)
+        manager = self._manager
+        self._pixels = manager.renderer._image(*manager._frame())
 
     def pixels(self, frame: _Frame) -> RGBAPixelArray:
         assert self._pixels is not None

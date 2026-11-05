@@ -45,7 +45,7 @@ def test_t_values_with_skip_animations(
     """Skipped plays without updaters go to their end in one step."""
     scene = SquareToCircle()
     scene.update_to_time = Mock()
-    scene.renderer._original_skipping_status = True
+    scene._get_manager()._execution.original_skipping_status = True
     scene.render()
     assert scene.update_to_time.call_count == 1
 

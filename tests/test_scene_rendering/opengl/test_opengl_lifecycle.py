@@ -62,9 +62,9 @@ def test_render_opens_before_setup_and_close_retires_real_objects(
         assert scene.manager._file_writer is not None
 
     monkeypatch.setattr(scene, "setup", setup)
-    with scene._get_manager():
+    with scene._get_manager() as manager:
         scene.render()
-        scene.get_image()
+        renderer.render(*manager._frame())
         context = renderer.context
         frame = renderer.frame_buffer_object
         textures = renderer._snapshot_drawing._textures

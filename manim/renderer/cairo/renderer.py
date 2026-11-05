@@ -1,20 +1,14 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any
-
-from PIL import Image
 
 from manim.camera import Camera
 
 from ..._config import config
-from ...mobject.mobject import Mobject
-from ...utils.iterables import list_update
 from .. import _view
-from .._execution import _RendererExecutionView
 from .._reuse import PrefixMemo, node_key, view_key
-from ..frame import FrameBuilder
 from ..protocol import RenderConfig, RendererCapabilities
 from ..snapshot import RMesh
 from .mesh_faces import mesh_faces
@@ -30,7 +24,7 @@ if TYPE_CHECKING:
 __all__ = ["CairoRenderer"]
 
 
-class CairoRenderer(_RendererExecutionView):
+class CairoRenderer:
     """A renderer using Cairo.
 
     The renderer draws the camera's view, including inset views, into image
@@ -40,20 +34,16 @@ class CairoRenderer(_RendererExecutionView):
     """
 
     capabilities = RendererCapabilities(live_preview=False)
+    #: What tells this renderer's frames from another's, for the play cache.
+    cache_identity: tuple[str, Any] = ("cairo", ())
 
     def __init__(
         self,
-        camera_class: type[Camera] | None = None,
-        camera: Camera | None = None,
-        skip_animations: bool = False,
         *,
         _raster_settings: _CairoRasterSettings | None = None,
     ) -> None:
-        if camera is not None and camera_class is not None:
-            raise ValueError("Pass either camera or camera_class, not both.")
-        camera_cls = camera_class if camera_class is not None else Camera
-        self.camera = camera if camera is not None else camera_cls()
-        self._initialize_execution(skip_animations)
+        #: The camera of the scene drawn with this renderer, set by the scene.
+        self.camera: Camera = Camera()
         self._raster_settings = _raster_settings or _CairoRasterSettings(
             pixel_width=int(config["pixel_width"]),
             pixel_height=int(config["pixel_height"]),
@@ -62,7 +52,6 @@ class CairoRenderer(_RendererExecutionView):
         )
         self._target: _CairoRenderTarget | None = None
         self._sub_targets: dict[int, _CairoRenderTarget] = {}
-        self._frame_builder: FrameBuilder | None = None
         # The drawing of the leading nodes of a frame of the whole scene that did
         # not change, and their keys.
         self._memo = PrefixMemo()
@@ -75,20 +64,11 @@ class CairoRenderer(_RendererExecutionView):
         if self._closed:
             raise RuntimeError("The Cairo renderer is closed.")
 
-    def _get_target(self) -> _CairoRenderTarget:
-        self._ensure_open()
-        if self._target is None:
-            self._target = _CairoRenderTarget(self._raster_settings)
-        return self._target
-
     @property
     def pixel_size(self) -> tuple[int, int]:
         """The width and height in pixels of frames drawn for a scene."""
         settings = self._raster_settings
         return settings.pixel_width, settings.pixel_height
-
-    def _animation_cache_identity(self, scene: Scene) -> tuple[str, Any]:
-        return "cairo", ()
 
     def _start_animation(self) -> None:
         self._ensure_open()
@@ -224,70 +204,23 @@ class CairoRenderer(_RendererExecutionView):
         context.draw_nodes(nodes[start:])
         memo.drew(keys, view)
 
-    def _frames(self) -> FrameBuilder:
-        settings = self._raster_settings
-        if self._frame_builder is None:
-            self._frame_builder = FrameBuilder(
-                settings.pixel_width, settings.pixel_height
-            )
-        return self._frame_builder
-
-    def update_frame(
-        self,
-        scene: Scene,
-        mobjects: Iterable[Mobject] | None = None,
-        include_submobjects: bool = True,
-        ignore_skipping: bool = True,
-        **kwargs: Any,
-    ) -> None:
-        """Draw the scene's current state into the renderer's image buffer."""
-        self._ensure_open()
-        if self.skip_animations and not ignore_skipping:
-            return
-        if not mobjects:
-            mobjects = list_update(scene.mobjects, scene.foreground_mobjects)
-        self.render(*self._frames().build(self.camera, mobjects))
-
-    def render_mobjects(
-        self,
-        mobjects: Iterable[Mobject],
-        *,
-        camera: Camera | None = None,
-    ) -> None:
-        """Draw the supplied mobjects into the renderer's image buffer."""
-        self.render(
-            *self._frames().build(self.camera if camera is None else camera, mobjects)
-        )
-
-    def render_scene(self, scene: Scene, time: float) -> None:
-        # Manager advances animation time and sends the pixels to the writer.
-        self.update_frame(scene)
-
-    def get_frame(self) -> RGBAPixelArray:
-        """Copy the current image to an RGBA array, with row zero at the top."""
-        return self._get_target().read_pixels()
-
     @contextlib.contextmanager
     def _scene_images(self) -> Iterator[None]:
         """See OpenGLRenderer._scene_images; Cairo images are cheap to set up."""
         yield
 
-    def _get_scene_image(self, scene: Scene) -> Image.Image:
-        """Draw a snapshot with a temporary renderer at the existing resolution."""
-        renderer = CairoRenderer(
-            camera=self.camera, _raster_settings=self._raster_settings
-        )
+    def _image(self, nodes: Sequence[RNode], config: RenderConfig) -> RGBAPixelArray:
+        """Draw a frame for inspection, apart from the frames of a render.
+
+        A temporary renderer draws it, so that it works before the scene renders
+        and after the renderer closed, and leaves the drawing kept for the next
+        frame alone.
+        """
+        renderer = CairoRenderer(_raster_settings=self._raster_settings)
         try:
-            renderer.render_mobjects(
-                list_update(scene.mobjects, scene.foreground_mobjects)
-            )
-            return renderer.get_image()
+            return renderer.render(nodes, config)
         finally:
             renderer.close()
-
-    def get_image(self) -> Image.Image:
-        """Return the current target as a PIL image."""
-        return Image.fromarray(self.get_frame())
 
     def open(self) -> None:
         """Check that the renderer can draw.

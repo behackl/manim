@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -116,8 +116,6 @@ class _AnimationRenderer(Protocol):
     sends frames to the writer. The renderer prepares its drawing resources and
     uses wall-clock time to pace its live preview.
     """
-
-    def _animation_cache_identity(self, scene: Scene) -> tuple[str, Any]: ...
 
     def _start_animation(self) -> None: ...
 

@@ -19,7 +19,7 @@ def test_preview_presents_without_advancing_time(scene, monkeypatch):
     manager = scene.manager
     manager.time = 2
     draw = Mock()
-    monkeypatch.setattr(scene.renderer, "render_scene", draw)
+    monkeypatch.setattr(scene.renderer, "render", draw)
     window = Mock()
     monkeypatch.setattr(scene.renderer, "window", window)
     manager._render_preview_frame(-1)

@@ -38,18 +38,20 @@ def test_fresh_image_without_evaluation(image_scene, monkeypatch):
 
     monkeypatch.setattr(scene, "construct", unexpected)
     monkeypatch.setattr(scene._get_manager().file_writer, "write_frame", unexpected)
-    scene.renderer.update_frame(scene)
-    old = scene.renderer.get_frame()
+    old = scene.renderer.render(*scene._get_manager()._frame()).copy()
     square.shift(3 * RIGHT)
     image = scene.get_image()
     assert isinstance(image, Image.Image)
     assert image.size == (128, 128)
     assert not np.array_equal(old, np.asarray(image))
-    np.testing.assert_array_equal(scene.renderer.get_frame(), old)
+    square.shift(-3 * RIGHT)
+    # Inspection leaves the drawing kept for the next frame alone.
+    np.testing.assert_array_equal(
+        scene.renderer.render(*scene._get_manager()._frame()), old
+    )
     assert calls == []
     assert scene.time == 0
-    assert scene.renderer.num_plays == 0
-    square.shift(-3 * RIGHT)
+    assert scene._get_manager().num_plays == 0
     np.testing.assert_array_equal(np.asarray(scene.get_image()), old)
 
 
@@ -64,7 +66,7 @@ def test_capture_during_construct_and_after_render(image_scene, monkeypatch):
         clock = image_scene.time
         images.append(image_scene.get_image())
         assert image_scene.time == clock
-        assert image_scene.renderer.num_plays == 1
+        assert image_scene._get_manager().num_plays == 1
 
     monkeypatch.setattr(image_scene, "construct", construct)
     image_scene.render()
@@ -83,8 +85,8 @@ def test_cairo_snapshot_camera_and_nested_view_parity(scene_class):
                 scene.activate_zooming(animate=False)
             scene.camera.frame.shift(RIGHT)
             image = scene.get_image()
-            scene.renderer.update_frame(scene)
-            np.testing.assert_array_equal(image, scene.renderer.get_frame())
+            frame = scene.renderer.render(*scene._get_manager()._frame())
+            np.testing.assert_array_equal(image, frame)
         finally:
             scene.renderer.close()
 

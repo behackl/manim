@@ -31,8 +31,35 @@ from manim import (
 )
 from manim.renderer import _view
 from manim.renderer.cairo import CairoRenderer
+from manim.renderer.frame import FrameBuilder
 from manim.renderer.snapshot import RPath
 from manim.utils.color import color_to_int_rgba
+
+
+class _Drawn:
+    """A Cairo renderer drawing what ``camera`` sees, through the renderer interface."""
+
+    def __init__(self, camera=None):
+        self.camera = Camera() if camera is None else camera
+        self.renderer = CairoRenderer()
+        self._frames = FrameBuilder(*self.renderer.pixel_size)
+        self._pixels = None
+
+    def render_mobjects(self, mobjects):
+        self._pixels = self.renderer.render(*self._frames.build(self.camera, mobjects))
+
+    def get_frame(self):
+        return self._pixels.copy()
+
+    def get_image(self):
+        return Image.fromarray(self.get_frame())
+
+    @property
+    def _sub_targets(self):
+        return self.renderer._sub_targets
+
+    def close(self):
+        self.renderer.close()
 
 
 def test_movingcamera_auto_zoom():
@@ -52,7 +79,7 @@ def test_default_camera_preserves_square_geometry(camera_class, pixel_shape):
         assert camera.frame_width == pytest.approx(config.frame_width)
         assert camera.frame_width / camera.frame_height == pytest.approx(width / height)
         frame_points = camera.frame.points.copy()
-        renderer = CairoRenderer(camera=camera)
+        renderer = _Drawn(camera)
         try:
             renderer.render_mobjects(
                 [Square(fill_color="#ffffff", fill_opacity=1, stroke_width=0)],
@@ -104,11 +131,9 @@ def test_mobject_get_image_uses_temporary_renderer():
 
 def test_renderer_owns_background_readback():
     with tempconfig({"pixel_width": 8, "pixel_height": 4}):
-        renderer = CairoRenderer(
-            camera=Camera(background_color=RED, background_opacity=0.5),
-        )
+        renderer = _Drawn(Camera(background_color=RED, background_opacity=0.5))
         try:
-            renderer.update_frame(None, mobjects=[Mobject()])
+            renderer.render_mobjects([Mobject()])
             pixels = renderer.get_frame()
             expected = color_to_int_rgba(RED, 0.5)
             assert np.all(pixels == expected)
@@ -132,9 +157,9 @@ def test_background_image_is_loaded_by_renderer(tmp_path):
 
     with tempconfig({"pixel_width": 2, "pixel_height": 2}):
         camera = Camera(background_image=str(image_path))
-        renderer = CairoRenderer(camera=camera)
+        renderer = _Drawn(camera)
         try:
-            renderer.update_frame(None, mobjects=[Mobject()])
+            renderer.render_mobjects([Mobject()])
             np.testing.assert_array_equal(renderer.get_frame(), source)
         finally:
             renderer.close()
@@ -148,9 +173,9 @@ def test_background_image_is_resized_to_target(tmp_path):
     Image.fromarray(source, mode="RGBA").save(image_path)
 
     with tempconfig({"pixel_width": 2, "pixel_height": 2}):
-        renderer = CairoRenderer(camera=Camera(background_image=str(image_path)))
+        renderer = _Drawn(Camera(background_image=str(image_path)))
         try:
-            renderer.update_frame(None, mobjects=[Mobject()])
+            renderer.render_mobjects([Mobject()])
             expected = np.asarray(
                 Image.fromarray(source, mode="RGBA").resize((2, 2)),
                 dtype=np.uint8,
@@ -165,7 +190,7 @@ def test_background_image_objects_are_read_each_time_they_are_drawn():
     square = Square(side_length=20, fill_opacity=1, stroke_width=0)
     square.color_using_background_image(image)
     with tempconfig({"pixel_width": 2, "pixel_height": 2}):
-        renderer = CairoRenderer()
+        renderer = _Drawn()
         try:
             renderer.render_mobjects([square])
             image.paste((0, 0, 255, 255), (0, 0, 2, 2))  # edited in place
@@ -179,7 +204,7 @@ def test_nested_view_preserves_square_geometry():
     with tempconfig({"pixel_width": 96, "pixel_height": 160}):
         view = ImageMobjectFromCamera(Camera())
         view.set(width=8)
-        renderer = CairoRenderer(camera=MultiCamera([view]))
+        renderer = _Drawn(MultiCamera([view]))
         try:
             renderer.render_mobjects(
                 [Square(fill_color="#ffffff", fill_opacity=1, stroke_width=0), view]
@@ -199,7 +224,7 @@ def test_camera_view_with_a_side_in_line_with_its_longest_side_is_drawn():
     with tempconfig({"pixel_width": 160, "pixel_height": 90}):
         view = ImageMobjectFromCamera(Camera(background_color="#ffffff"))
         view.points = np.array([a, b, d, c], dtype=float)
-        renderer = CairoRenderer(camera=MultiCamera([view]))
+        renderer = _Drawn(MultiCamera([view]))
         try:
             renderer.render_mobjects([view])
             assert renderer.get_frame()[..., 0].any()
@@ -207,21 +232,12 @@ def test_camera_view_with_a_side_in_line_with_its_longest_side_is_drawn():
             renderer.close()
 
 
-@pytest.mark.parametrize(
-    "operation",
-    [
-        lambda renderer: renderer.render_mobjects([]),
-        lambda renderer: renderer.get_frame(),
-        lambda renderer: renderer.get_image(),
-    ],
-    ids=["draw", "pixels", "image"],
-)
-def test_closed_renderer_rejects_drawing(operation):
+def test_closed_renderer_rejects_drawing():
     with tempconfig({"pixel_width": 8, "pixel_height": 4}):
-        renderer = CairoRenderer(skip_animations=True)
+        renderer = _Drawn()
         renderer.close()
         with pytest.raises(RuntimeError, match="closed"):
-            operation(renderer)
+            renderer.render_mobjects([])
 
 
 @pytest.mark.parametrize("renderer_name", ["cairo", "opengl"])
@@ -271,7 +287,7 @@ def _angled_line(**kwargs):
 
 
 def _render_pixels(mobjects):
-    renderer = CairoRenderer(camera=Camera())
+    renderer = _Drawn(Camera())
     try:
         renderer.render_mobjects(mobjects)
         return renderer.get_frame().copy()
@@ -334,7 +350,7 @@ def test_3d_images_line_up_with_vmobjects_when_frame_center_moves():
         square.move_to(2 * RIGHT).set_stroke(width=0)
 
         def white_columns(mobject):
-            renderer = CairoRenderer(camera=camera)
+            renderer = _Drawn(camera)
             try:
                 renderer.render_mobjects([mobject])
                 return np.where(renderer.get_frame()[..., 0].max(axis=0) > 128)[0]
@@ -354,7 +370,7 @@ def test_copied_camera_view_shows_the_same_camera():
         copy = view.copy().shift(6 * RIGHT)
         assert copy.camera is source
 
-        renderer = CairoRenderer(camera=MultiCamera([view]))
+        renderer = _Drawn(MultiCamera([view]))
         try:
             renderer.render_mobjects([view, copy])
             red = renderer.get_frame()[..., 0] > 128
@@ -376,7 +392,7 @@ def test_3d_camera_computes_its_view_once_per_frame(monkeypatch):
     )
     squares = [Square().shift(0.1 * i * RIGHT) for i in range(20)]
     with tempconfig({"pixel_width": 32, "pixel_height": 18}):
-        renderer = CairoRenderer(camera=camera)
+        renderer = _Drawn(camera)
         try:
             renderer.render_mobjects(squares)
         finally:
@@ -396,7 +412,7 @@ def test_redrawn_frames_follow_point_changes(change, monkeypatch):
 
     with tempconfig({"pixel_width": 64, "pixel_height": 36}):
         square = Square(fill_opacity=1)
-        renderer, fresh = CairoRenderer(camera=Camera()), CairoRenderer(camera=Camera())
+        renderer, fresh = _Drawn(Camera()), _Drawn(Camera())
         try:
             before = frame_of(square, renderer)
             assert np.array_equal(frame_of(square, renderer), before)
@@ -414,7 +430,7 @@ def test_redrawn_frames_follow_point_changes(change, monkeypatch):
 
 def test_mobjects_fixed_in_frame_stay_put_when_the_camera_moves():
     with tempconfig({"pixel_width": 64, "pixel_height": 36}):
-        renderer = CairoRenderer(camera=MovingCamera())
+        renderer = _Drawn(MovingCamera())
         hud = Square(1, fill_opacity=1, stroke_width=0).to_corner(UR).fix_in_frame()
         try:
             renderer.render_mobjects([hud])

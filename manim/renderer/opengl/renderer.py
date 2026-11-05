@@ -19,7 +19,6 @@ from manim.utils.iterables import list_update
 from ...camera import Camera
 from ...constants import *
 from .. import _view as _views
-from .._execution import _RendererExecutionView
 from ..frame import FrameBuilder
 from ..protocol import RenderConfig, RendererCapabilities
 from .drawing import DrawTarget, SnapshotDrawing
@@ -45,7 +44,7 @@ __all__ = ["OpenGLRenderer"]
 _active_context = threading.local()
 
 
-class OpenGLRenderer(_RendererExecutionView):
+class OpenGLRenderer:
     """
     An OpenGL-based renderer.
 
@@ -55,55 +54,29 @@ class OpenGLRenderer(_RendererExecutionView):
         The elapsed time of the current animation.
     animation_start_time : float
         The start time of the current animation.
-    animations_hashes : list[str | None]
-        List of animation hashes for caching.
     anti_alias_width : float
         The width used for anti-aliasing in pixel units.
     camera : Camera
         The camera used for rendering: the same camera classes as the Cairo renderer.
-    num_plays : float
-        The number of animation plays executed.
     pressed_keys : set[int]
         Set of currently pressed key codes.
-    skip_animations : bool
-        Whether animations are currently being skipped.
-    time : float
-        The total elapsed time for the renderer.
     window : Window | None
         The window used for previewing, if any.
     """
 
     capabilities = RendererCapabilities(live_preview=True)
+    #: What tells this renderer's frames from another's, for the play cache.
+    cache_identity: tuple[str, Any] = ("opengl", {"anti_alias_width": 1.5})
 
-    def __init__(
-        self,
-        skip_animations: bool = False,
-        camera_class: type[Camera] | None = None,
-        camera: Camera | None = None,
-    ) -> None:
-        """Initializes the OpenGLRenderer.
-
-        Parameters
-        ----------
-        skip_animations : bool, optional
-            Whether to skip animations during rendering, by default False.
-        camera_class
-            The camera class to instantiate, by default :class:`.Camera`.
-        camera
-            A camera to use instead of instantiating ``camera_class``.
-        """
-        if camera is not None and camera_class is not None:
-            raise ValueError("Pass either camera or camera_class, not both.")
-        # Measured in pixel widths, used for vector graphics
+    def __init__(self) -> None:
+        # Measured in pixel widths, used for vector graphics; part of cache_identity.
         self.anti_alias_width = 1.5
 
-        self._initialize_execution(skip_animations)
         self.animation_start_time = 0.0
         self.animation_elapsed_time = 0.0
 
-        self.camera: Camera = (
-            camera if camera is not None else (camera_class or Camera)()
-        )
+        #: The camera of the scene drawn with this renderer, set by the scene.
+        self.camera: Camera = Camera()
         self.perspective_uniforms: dict[str, Any] = {}
         self.camera_view: _CameraView = _CameraView.of(self.camera._state())
         self._camera_state = self.camera._state()
@@ -180,7 +153,7 @@ class OpenGLRenderer(_RendererExecutionView):
                 )
             self._activate_context()
             return
-        if not hasattr(self, "scene"):
+        if not hasattr(self, "_pixel_size"):
             raise RuntimeError("Bind an OpenGL scene before opening its resources.")
         previous = getattr(_active_context, "renderer", None)
         resources = contextlib.ExitStack()
@@ -489,11 +462,6 @@ class OpenGLRenderer(_RendererExecutionView):
         """The width and height in pixels of frames drawn for a scene."""
         return self._pixel_size
 
-    def _animation_cache_identity(self, scene: Scene) -> tuple[str, Any]:
-        return "opengl", {
-            "anti_alias_width": self.anti_alias_width,
-        }
-
     def _start_animation(self) -> None:
         self.open()
         self.animation_start_time = time.time()
@@ -563,10 +531,10 @@ class OpenGLRenderer(_RendererExecutionView):
             if kept is not None:
                 kept.close()
 
-    def _get_scene_image(self, scene: Scene) -> Image.Image:
-        """Draw a snapshot separately from the live-preview framebuffer.
+    def _image(self, nodes: Sequence[RNode], config: RenderConfig) -> RGBAPixelArray:
+        """Draw a frame for inspection, apart from the live-preview framebuffer.
 
-        An existing context is used on its rendering thread. Otherwise, the scene
+        An existing context is used on its rendering thread. Otherwise, the frame
         is drawn with a temporary context and renderer.
         """
         if (
@@ -581,16 +549,14 @@ class OpenGLRenderer(_RendererExecutionView):
         if self._context is None:
             kept = self._image_renderer
             temporary = kept if kept is not None else OpenGLRenderer()
-            temporary.scene = scene
-            temporary.camera = self.camera
+            temporary._scene_bound = True
             temporary._pixel_size = self._pixel_size
             temporary._wireframe = self._wireframe
             temporary._window_settings = None
             self._capturing_image = True
             try:
                 try:
-                    temporary._draw_scene(scene)
-                    image = temporary.get_image()
+                    pixels = temporary.render(nodes, config)
                 except BaseException:
                     self._image_renderer = None
                     try:
@@ -604,7 +570,7 @@ class OpenGLRenderer(_RendererExecutionView):
                     self._image_renderer = temporary
                 else:
                     temporary.close()
-                return image
+                return pixels
             finally:
                 self._capturing_image = False
         target = self.frame_buffer_object
@@ -620,12 +586,16 @@ class OpenGLRenderer(_RendererExecutionView):
                 resources.callback(depth.release)
                 frame = self.context.framebuffer(color, depth)
                 resources.callback(frame.release)
+                drawing = self._snapshot_drawing
+                # A separate drawing state: the reuse kept for the live frames stays.
+                self._snapshot_drawing = SnapshotDrawing(self)
                 try:
                     self.frame_buffer_object = frame
                     frame.use()
-                    self._draw_scene(scene)
-                    return Image.fromarray(self.get_frame())
+                    return self.render(nodes, config)
                 finally:
+                    self._snapshot_drawing.release()
+                    self._snapshot_drawing = drawing
                     self.frame_buffer_object = target
                     (target if bound is None else bound).use()
                     self.context.viewport = viewport

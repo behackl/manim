@@ -13,22 +13,22 @@ from moderngl import Framebuffer
 from PIL import Image
 
 from manim._config import config, logger
-from manim.renderer.snapshot import Extractor
 from manim.typing import Point3D
 from manim.utils.iterables import list_update
 
-from ...camera import Camera, MultiCamera
+from ...camera import Camera
 from ...constants import *
 from ...scene.scene_file_writer import SceneFileWriter
 from .. import _view as _views
 from .._execution import _RendererExecutionView
-from ..protocol import CameraState, RendererCapabilities
+from ..frame import FrameBuilder
+from ..protocol import RenderConfig, RendererCapabilities
 from .drawing import DrawTarget, SnapshotDrawing
 from .shader import shader_program_cache
 from .window_settings import _WindowSettings
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Sequence
 
     from manim._config.render_session import RenderSessionSpec
     from manim.animation.animation import Animation
@@ -38,6 +38,8 @@ if TYPE_CHECKING:
         RGBAPixelArray,
     )
 
+    from ..protocol import CameraState
+    from ..snapshot import RNode
     from .window import Window
 
 __all__ = ["OpenGLRenderer"]
@@ -107,8 +109,9 @@ class OpenGLRenderer(_RendererExecutionView):
         )
         self.perspective_uniforms: dict[str, Any] = {}
         self.camera_view: _CameraView = _CameraView.of(self.camera._state())
+        self._camera_state = self.camera._state()
         self._snapshot_drawing = SnapshotDrawing(self)
-        self._extractor = Extractor()
+        self._frame_builder: FrameBuilder | None = None
         self._camera_view_targets: dict[int, _ViewTarget] = {}
         self.pressed_keys: set[int] = set()
         self.window: Window | None = None
@@ -382,32 +385,22 @@ class OpenGLRenderer(_RendererExecutionView):
         _, _, pixel_width, pixel_height = frame_buffer.viewport
         return pixel_width, pixel_height
 
-    def refresh_perspective_uniforms(self, camera: Camera) -> None:
-        """Update the camera uniforms from ``camera``.
+    def _set_view(self, config: RenderConfig) -> None:
+        """Set the camera uniforms for the frame of ``config``.
 
         The shaders rotate points about the frame center, divide by the frame
         shape and apply a perspective factor ``focal_distance / (focal_distance - z)``,
         which is what :meth:`.ThreeDCamera.project_points` does on the CPU. A
         camera without rotation draws orthographically.
-
-        Parameters
-        ----------
-        camera
-            The camera whose view to draw.
-
-        Raises
-        ------
-        ValueError
-            If the renderer's pixel shape is not available.
         """
         self.open()
         pixel_shape = self.get_pixel_shape()
         if pixel_shape is None:
-            msg = "Pixel shape is None, cannot refresh perspective uniforms."
+            msg = "Pixel shape is None, cannot set the view."
             raise ValueError(msg)
         _, pixel_height = pixel_shape
-        self._camera_state = camera._state()
-        view = self.camera_view = _CameraView.of(self._camera_state)
+        self._camera_state = config.camera
+        view = self.camera_view = _CameraView.of(config.camera)
         self.perspective_uniforms = self.camera_uniforms(view, pixel_height)
 
     def camera_uniforms(self, view: _CameraView, pixel_height: int) -> dict[str, Any]:
@@ -423,9 +416,6 @@ class OpenGLRenderer(_RendererExecutionView):
             "focal_distance": view.focal_distance,
         }
 
-    def _background_rgba(self) -> tuple[float, float, float, float]:
-        return _background_rgba(self.camera)
-
     def _frame_target(self) -> DrawTarget:
         pixel_shape = self.get_pixel_shape()
         assert pixel_shape is not None
@@ -437,74 +427,76 @@ class OpenGLRenderer(_RendererExecutionView):
             self.perspective_uniforms,
         )
 
-    def _draw_snapshots(
-        self, scene: Scene, mobjects: list[Mobject] | None = None
-    ) -> None:
-        """Draw mobjects (by default the scene's) from render snapshots, camera views
-        first.
+    def render(self, nodes: Sequence[RNode], config: RenderConfig, /) -> RGBAPixelArray:
+        """Draw ``nodes`` as ``config`` sets them up; return the pixels.
+
+        The picture is drawn into the renderer's framebuffer, which a preview
+        window shows (see :meth:`_present_frame`).
         """
-        if mobjects is None:
-            mobjects = list_update(scene.mobjects, scene.foreground_mobjects)
-        views = self._draw_camera_views(mobjects)
-        nodes = self._extractor.extract(mobjects, use_z_index=self.camera.use_z_index)
+        self._draw(nodes, config)
+        return self.get_frame()
+
+    def _draw(self, nodes: Sequence[RNode], config: RenderConfig) -> None:
+        """Draw a frame into the framebuffer, camera views first."""
+        self._final_scene = None
+        self._set_view(config)
+        views = self._draw_camera_views(config)
+        self.frame_buffer_object.use()
+        background = _background_rgba(config)
+        self.frame_buffer_object.clear(*background)
         self._snapshot_drawing.draw(
-            _views.sort_for_display(self._camera_state, nodes),
+            _views.sort_for_display(config.camera, list(nodes)),
             self._frame_target(),
             views,
-            background=self._background_rgba(),
+            background=background,
         )
 
-    def _draw_camera_views(self, mobjects: list[Mobject]) -> dict[int, Any]:
-        """Draw what each camera view of a :class:`.MultiCamera` sees into a texture.
-
-        Returns the textures by the uid of their :class:`.ImageMobjectFromCamera`.
+    def _draw_camera_views(self, config: RenderConfig) -> dict[int, Any]:
+        """Draw each camera view into a texture; return them by the uid of the
+        view's node, and by ``("camera", camera_id)`` for copies of a view.
         """
-        if not isinstance(self.camera, MultiCamera):
-            return {}
-        pixel_shape = self.get_pixel_shape()
-        assert pixel_shape is not None
-        textures = {}
-        for image_mobject in self.camera.image_mobjects_from_cameras:
-            size = (
-                max(
-                    1,
-                    int(pixel_shape[0] * image_mobject.width / self.camera.frame_width),
-                ),
-                max(
-                    1,
-                    int(
-                        pixel_shape[1] * image_mobject.height / self.camera.frame_height
-                    ),
-                ),
-            )
-            view_target = self._camera_view_targets.get(image_mobject.uid)
+        textures: dict[Any, Any] = {}
+        drawn = set()
+        for view in config.camera_views:
+            view_config = view.config
+            size = (view_config.pixel_width, view_config.pixel_height)
+            view_target = self._camera_view_targets.get(view.uid)
             if view_target is None or view_target.size != size:
                 if view_target is not None:
                     view_target.release()
                 view_target = _ViewTarget(self, size)
-                self._camera_view_targets[image_mobject.uid] = view_target
-            camera = image_mobject.camera
-            state = camera._state()
-            view = _CameraView.of(state)
+                self._camera_view_targets[view.uid] = view_target
+            state = view_config.camera
+            camera_view = _CameraView.of(state)
             target = DrawTarget(
                 view_target.framebuffer,
                 size,
                 state,
-                view,
-                self.camera_uniforms(view, size[1]),
+                camera_view,
+                self.camera_uniforms(camera_view, size[1]),
             )
             view_target.framebuffer.use()
-            view_target.framebuffer.clear(*_background_rgba(camera))
-            nodes = self._extractor.extract(
-                mobjects,
-                use_z_index=camera.use_z_index,
-                excluded_mobjects=[image_mobject],
+            view_target.framebuffer.clear(*_background_rgba(view_config))
+            view_target.drawing.draw(
+                _views.sort_for_display(state, list(view.nodes)), target
             )
-            view_target.drawing.draw(_views.sort_for_display(state, nodes), target)
-            textures[image_mobject.uid] = view_target.texture
-        for uid in self._camera_view_targets.keys() - textures.keys():
+            textures[view.uid] = textures[("camera", view.camera_id)] = (
+                view_target.texture
+            )
+            drawn.add(view.uid)
+        for uid in self._camera_view_targets.keys() - drawn:
             self._camera_view_targets.pop(uid).release()
         return textures
+
+    def _frames(self) -> FrameBuilder:
+        if self._frame_builder is None:
+            self._frame_builder = FrameBuilder(*self.pixel_size)
+        return self._frame_builder
+
+    @property
+    def pixel_size(self) -> tuple[int, int]:
+        """The width and height in pixels of frames drawn for a scene."""
+        return self._pixel_size
 
     def update_skipping_status(self) -> None:
         """Ask the scene's manager whether this play should be fast-forwarded.
@@ -561,29 +553,18 @@ class OpenGLRenderer(_RendererExecutionView):
 
         The screen is cleared using the camera's background color.
         """
-        self.frame_buffer_object.clear(*self._background_rgba())
+        self.frame_buffer_object.clear(*_camera_background_rgba(self.camera))
         if self.window is None:
             return
         self.window.swap_buffers()
 
-    def render(self, scene: Scene, frame_offset: float) -> None:
-        """Draw a single frame of the scene's current state using OpenGL.
-
-        Parameters
-        ----------
-        scene
-            The scene to draw.
-        frame_offset
-            Animation-relative time in seconds. Accepted for the common renderer
-            interface; drawing itself does not use this value.
-
-        Notes
-        -----
-        This method draws into the framebuffer. The manager reads any pixels
-        needed for output and displays the preview window separately. Drawing
-        alone neither writes frames nor advances ``Scene.time``.
-        """
+    def render_scene(self, scene: Scene, frame_offset: float) -> None:
+        """Draw a frame of the scene's current state into the framebuffer."""
         self.update_frame(scene)
+
+    def _note_drawn(self) -> None:
+        """Note the wall-clock time of a frame drawn for the preview window."""
+        self.animation_elapsed_time = time.time() - self.animation_start_time
 
     def _present_frame(self, scene: Scene, frame_offset: float) -> None:
         """Refresh the preview window until wall-clock time reaches the frame offset."""
@@ -594,30 +575,18 @@ class OpenGLRenderer(_RendererExecutionView):
                 self.window.swap_buffers()
 
     def update_frame(self, scene: Scene) -> None:
+        """Draw a frame of the scene's current state into the framebuffer, and
+        note the wall-clock time for pacing the preview window.
         """
-        Update and render the current frame for the given scene.
-
-        Performs the following steps:
-        1. Clear the frame buffer with the background color.
-        2. Refresh camera perspective uniforms for rendering.
-        3. Draw render snapshots of the scene's mobjects.
-        4. Iterate through all mesh objects in the scene, setting their uniforms and rendering them.
-        5. Update the wall-clock time used to pace the preview window.
-
-        Parameters
-        ----------
-        scene : Scene
-            The scene to render the frame for.
-        """
-        self._final_scene = None
         self._draw_scene(scene)
         self.animation_elapsed_time = time.time() - self.animation_start_time
 
     def _draw_scene(self, scene: Scene) -> None:
-        """Draw the current objects without updating animation timing."""
-        self.refresh_perspective_uniforms(self.camera)
-        self.frame_buffer_object.clear(*self._background_rgba())
-        self._draw_snapshots(scene)
+        self._draw(
+            *self._frames().build(
+                self.camera, list_update(scene.mobjects, scene.foreground_mobjects)
+            )
+        )
 
     @contextlib.contextmanager
     def _scene_images(self) -> Iterator[None]:
@@ -1007,7 +976,12 @@ class _ViewTarget:
                 resource.release()
 
 
-def _background_rgba(camera: Camera) -> tuple[float, float, float, float]:
-    """The camera's background, as the framebuffer is cleared to it."""
+def _background_rgba(config: RenderConfig) -> tuple[float, float, float, float]:
+    """The background of a frame, as the framebuffer is cleared to it."""
+    r, g, b = config.background_color.to_rgb()
+    return float(r), float(g), float(b), float(config.background_opacity)
+
+
+def _camera_background_rgba(camera: Camera) -> tuple[float, float, float, float]:
     r, g, b = camera.background_color.to_rgb()
     return float(r), float(g), float(b), float(camera.background_opacity)

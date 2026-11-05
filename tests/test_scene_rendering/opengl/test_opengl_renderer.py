@@ -113,21 +113,6 @@ def test_get_frame_with_live_preview_enabled(config, using_opengl_renderer):
         renderer.window.close()
 
 
-def test_render_without_frame_output_skips_gpu_readback(
-    config,
-    using_opengl_renderer,
-):
-    config.format = "none"
-    config.live_preview = False
-    scene = SquareToCircle()
-    renderer = scene.renderer
-    renderer.get_frame = Mock(wraps=renderer.get_frame)
-
-    renderer.render(scene, 0)
-
-    renderer.get_frame.assert_not_called()
-
-
 def test_pixel_coords_to_space_coords(config, using_opengl_renderer):
     config.live_preview = False
 

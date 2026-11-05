@@ -27,10 +27,12 @@ from ._run.loop import (
 from ._run.record import _RunRecord
 from ._run.selection import _OutputSelection
 from .renderer.cairo.renderer import CairoRenderer
+from .renderer.frame import FrameBuilder
 from .scene.scene_file_writer import SceneFileWriter
 from .scene.section import DefaultSectionType
 from .utils.exceptions import EndSceneEarlyException, RerunSceneException
 from .utils.file_ops import open_media_file
+from .utils.iterables import list_update
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -47,6 +49,8 @@ if TYPE_CHECKING:
     from .mobject.mobject import Mobject, _AnimationBuilder
     from .renderer.cairo import CairoRenderer
     from .renderer.opengl.renderer import OpenGLRenderer
+    from .renderer.protocol import RenderConfig
+    from .renderer.snapshot import RNode
     from .scene.scene import Scene
     from .timeline import Timeline
     from .typing import RGBAPixelArray
@@ -151,6 +155,7 @@ class Manager(Generic[SceneT]):
         # The default of render(capture_timeline=...), set by the CLI.
         self._capture_timeline = False
         self._evaluating = False
+        self._frame_builder: FrameBuilder | None = None
         scene.manager = self
 
     def __enter__(self) -> Manager[SceneT]:
@@ -563,6 +568,15 @@ class Manager(Generic[SceneT]):
         """Draw a fresh scene image; see :meth:`.Scene.get_image` for snapshot behavior."""
         return self.renderer._get_scene_image(self.scene)
 
+    def _frame(self) -> tuple[list[RNode], RenderConfig]:
+        """The snapshots and configuration of a frame of the scene's current state."""
+        if self._frame_builder is None:
+            self._frame_builder = FrameBuilder(*self.renderer.pixel_size)
+        scene = self.scene
+        return self._frame_builder.build(
+            scene.camera, list_update(scene.mobjects, scene.foreground_mobjects)
+        )
+
     def setup(self) -> None:
         """Run the managed scene's :meth:`~manim.scene.scene.Scene.setup` hook."""
         self.scene.setup()
@@ -772,7 +786,7 @@ class Manager(Generic[SceneT]):
         """
         self._validate_execution()
         scene = self.scene
-        self.renderer.render(scene, frame_offset)
+        self.renderer.render_scene(scene, frame_offset)
         if self.skip_animations:
             return
         if self._wants_frame_pixels:

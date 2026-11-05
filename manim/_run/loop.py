@@ -142,23 +142,27 @@ class _Drawer(Protocol):
 
 
 class _TargetDrawer:
-    """Draw frames into the renderer's own target, as a render does."""
+    """Draw frames with the scene's renderer, as a render does."""
 
     def __init__(self, manager: Manager) -> None:
         self._manager = manager
         self._prepared = False
+        self._pixels: RGBAPixelArray | None = None
 
     def draw(self, frame: _Frame) -> None:
         renderer = self._manager.renderer
-        scene = self._manager.scene
         if not self._prepared:
             # Drawing resources, once per play and only for plays that draw.
             renderer._start_animation()
             self._prepared = True
-        renderer.render(scene, frame.offset)
+        self._pixels = renderer.render(*self._manager._frame())
+        note_drawn = getattr(renderer, "_note_drawn", None)
+        if note_drawn is not None:
+            note_drawn()
 
     def pixels(self, frame: _Frame) -> RGBAPixelArray:
-        return self._manager.renderer.get_frame()
+        assert self._pixels is not None
+        return self._pixels
 
     def end_play(self, play: _Play) -> None:
         self._prepared = False

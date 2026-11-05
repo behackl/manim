@@ -9,6 +9,7 @@ from manim import (
     LEFT,
     ORIGIN,
     PI,
+    RIGHT,
     UR,
     Axes,
     Circle,
@@ -218,3 +219,16 @@ def test_input_to_graph_point():
     # test the line_graph implementation
     position = np.around(ax.input_to_graph_point(x=PI, graph=line_graph), decimals=4)
     np.testing.assert_array_equal(position, (2.6928, 1.2876, 0))
+
+
+def test_3d_axis_pieces_are_shaded_along_their_own_axis():
+    axes = ThreeDAxes()
+    copy = axes.copy().shift(3 * RIGHT)
+    for group in (axes, copy):
+        axis = group.x_axis
+        piece = axis.family_members_with_points()[2]
+        assert piece.drawn_with() is axis
+        start, end = piece.get_gradient_start_and_end_points()
+        light = np.array(axes.light_source)
+        np.testing.assert_allclose(start, axis.get_edge_center(-light))
+        np.testing.assert_allclose(end, axis.get_edge_center(light))

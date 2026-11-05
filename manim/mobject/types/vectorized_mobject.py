@@ -228,6 +228,10 @@ class VMobject(Mobject):
             0, 1, n_points_per_cubic_curve
         )
         self.cap_style: CapStyleType = cap_style
+        #: A mobject whose extent the color gradient spans instead of this one's,
+        #: along :attr:`gradient_direction`.
+        self.gradient_group: Mobject | None = None
+        self.gradient_direction: Vector3D = np.array(RIGHT)
         super().__init__(**kwargs)
         self.submobjects: list[VMobject]
 
@@ -828,6 +832,15 @@ class VMobject(Mobject):
         return self.sheen_factor
 
     def get_gradient_start_and_end_points(self) -> tuple[Point3D, Point3D]:
+        """The points at which the color gradient starts and ends.
+
+        With a :attr:`gradient_group`, the gradient spans that group along
+        :attr:`gradient_direction` (see :meth:`.Mobject.drawn_with`).
+        """
+        group = self.gradient_group
+        if group is not None:
+            direction = self.gradient_direction
+            return group.get_edge_center(-direction), group.get_edge_center(direction)
         if self.shade_in_3d:
             return get_3d_vmob_gradient_start_and_end_points(self)
         else:
@@ -861,6 +874,9 @@ class VMobject(Mobject):
             if z_index_as_group:
                 submob.z_index_group = self
         return self
+
+    def drawn_with(self) -> Mobject | None:
+        return self.gradient_group or super().drawn_with()
 
     def set_points(self, points: Point3DLike_Array) -> Self:
         self.points: Point3D_Array = np.array(points)

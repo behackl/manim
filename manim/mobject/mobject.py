@@ -2629,6 +2629,15 @@ class Mobject:
             )
         )
 
+    def drawn_with(self) -> Mobject | None:
+        """The mobject whose points the drawing of this one also depends on, if any.
+
+        A mobject is drawn from its own fields, except for values that span a group
+        of mobjects (see :meth:`.VMobject.drawn_with`). Renderers that keep drawings
+        of unchanged mobjects compare the versions of that group's family too.
+        """
+        return getattr(self, "z_index_group", None)
+
     def get_z_index_reference_point(self) -> Point3D:
         # TODO, better place to define default z_index_group?
         z_index_group = getattr(self, "z_index_group", self)

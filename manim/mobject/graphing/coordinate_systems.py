@@ -2506,17 +2506,11 @@ class ThreeDAxes(Axes):
             axis.set_shade_in_3d(True)
 
     def _set_axis_shading(self) -> None:
-        def make_func(axis):
-            vect = self.light_source
-            return lambda: (
-                axis.get_edge_center(-vect),
-                axis.get_edge_center(vect),
-            )
-
+        # Each piece of an axis is shaded along the whole axis, towards the light.
         for axis in self:
             for submob in axis.family_members_with_points():
-                submob.get_gradient_start_and_end_points = make_func(axis)
-                submob.get_unit_normal = lambda a: np.ones(3)
+                submob.gradient_group = axis
+                submob.gradient_direction = np.array(self.light_source)
                 submob.set_sheen(0.2)
 
     def get_y_axis_label(

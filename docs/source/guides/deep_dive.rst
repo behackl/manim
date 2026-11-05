@@ -398,20 +398,19 @@ the manager logs a warning. The writer records the completed artifact as
 specification to open the artifact or reveal it in the file browser.
 
 **Closing resources and inspecting results.** By default, rendering closes the
-renderer once the output is complete. To read the last-rendered frame directly
-from the renderer, keep it open with a ``with manager:`` block::
+renderer once the output is complete. To keep it open, for instance to show more
+frames in a preview window, use a ``with manager:`` block::
 
     scene = ToyExample()
     manager = Manager(scene)
     with manager:
         manager.render()
-        last_frame = manager.renderer.get_frame()
+        last_frame = scene.get_image()
 
 The renderer stays open after successful rendering until the end of the ``with``
-block. The scene and its mobjects remain available afterward. To draw a new image,
-call ``scene.get_image()``; it creates temporary rendering resources as needed.
-OpenGL meshes stored directly on the GPU require their original context, so these
-must be inspected inside the block.
+block. The scene and its mobjects remain available afterward:
+``scene.get_image()`` draws the scene's current state, with temporary rendering
+resources if the renderer is closed.
 
 When file logging is enabled, the manager opens the scene's log at the start of
 rendering or the first direct ``play()`` call. It removes and closes that handler
@@ -975,15 +974,17 @@ At this point, the internal (Python) state of all mobjects has been updated
 to match the currently processed timestamp. If the play is part of the output,
 it is now time to *take a picture*!
 
-To render an image, the encoder calls the corresponding method of the renderer,
-:meth:`.CairoRenderer.render`. All of the hard work then happens when the renderer
-updates its current frame via a call to :meth:`.CairoRenderer.update_frame`:
+To take it, the manager's :class:`.FrameBuilder` turns the scene into what a
+renderer draws: render snapshots of the scene's mobjects (see
+:mod:`manim.renderer.snapshot`), in drawing order, and a :class:`.RenderConfig`
+holding the camera's state (a :class:`.CameraState`: frame, orientation,
+background) and the views of any :class:`.MultiCamera` cameras. The renderer
+only draws: ``renderer.render(nodes, config)`` returns the frame's pixels. It
+knows nothing of scenes, mobjects or cameras, so another renderer draws the
+same frames from the same input.
 
-First, the renderer resets its Cairo image buffer using the camera's background
-color or image. Background images are resized to match the buffer's dimensions.
-
-The renderer then takes render snapshots of the scene's mobjects (see
-:mod:`manim.renderer.snapshot`), in drawing order. Each snapshot carries the
+The Cairo renderer first resets its image buffer to the camera's background color
+or image; background images are resized to match the buffer's dimensions. Each snapshot carries the
 versions of the mobject's fields, so the renderer can tell what changed since
 the previous frame without being told: the snapshots at the start of the list
 that are drawn from the same values, from the same view, as in the previous frame
@@ -1004,22 +1005,23 @@ in Manim's tests, every reused snapshot is checked against a fresh one.
 Things get a bit technical here, and at some point it is more efficient to delve into
 the implementation -- but the drawing process can be summarized as follows:
 
-- The camera supplies a flat, ordered list of visible mobjects and applies
-  view/projection and shading transformations. Its animatable ``frame`` describes the
-  region being viewed.
+- The camera's state says what is viewed (its animatable ``frame``), from where
+  (its orientation), and how meshes are shaded. Mesh faces are projected, shaded
+  and sorted by depth from it in the renderer.
 - Private Cairo renderer helpers process consecutive batches of vectorized, point
   cloud, and image mobjects without changing their draw order.
 - Vectorized mobjects are converted to Cairo paths and drawn with their background
   stroke, fill, and foreground stroke. Point clouds and image mobjects are converted
   to target pixel coordinates and composited by renderer helpers.
-- With a :class:`.MultiCamera`, the renderer draws each secondary camera's view into
-  a separate image buffer, excluding that camera's own display mobject. It then draws
-  the resulting image in the corresponding :class:`.ImageMobjectFromCamera` in the
-  primary view.
+- With a :class:`.MultiCamera`, the renderer draws each secondary camera's view
+  (given in the :class:`.RenderConfig`, without that camera's own display mobject)
+  into a separate image buffer. It then draws the resulting image in the
+  corresponding :class:`.ImageMobjectFromCamera` in the primary view.
 
-After drawing, :meth:`.CairoRenderer.get_frame` copies the rendered image into a
-top-left-origin, C-contiguous ``uint8`` RGBA array, which the encoder passes to
-the :class:`.SceneFileWriter`. Then the manager advances the clock by one frame.
+The renderer returns the drawn image as a top-left-origin, C-contiguous ``uint8``
+RGBA array, which the manager passes to the :class:`.SceneFileWriter`. With the
+OpenGL renderer and a live preview, the manager then calls ``renderer.present()``
+to show the frame in the preview window, which it paces by wall-clock time. Then the manager advances the clock by one frame.
 If the animation has a stop condition, the manager checks it at this point,
 before starting the next iteration.
 

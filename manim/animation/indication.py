@@ -40,7 +40,7 @@ __all__ = [
 ]
 
 from collections.abc import Iterable
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
 
@@ -48,7 +48,6 @@ from manim.mobject.geometry.arc import Circle, Dot
 from manim.mobject.geometry.line import Line
 from manim.mobject.geometry.polygram import Rectangle
 from manim.mobject.geometry.shape_matchers import SurroundingRectangle
-from manim.scene.scene import Scene
 
 from .._config import config
 from ..animation.animation import Animation
@@ -66,6 +65,9 @@ from ..utils.bezier import interpolate, inverse_interpolate
 from ..utils.color import GREY, PURE_YELLOW, ParsableManimColor
 from ..utils.rate_functions import RateFunction, smooth, there_and_back, wiggle
 from ..utils.space_ops import normalize
+
+if TYPE_CHECKING:
+    from manim.scene.scene import Scene
 
 
 class FocusOn(Transform):

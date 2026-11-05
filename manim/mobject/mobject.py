@@ -66,7 +66,7 @@ if TYPE_CHECKING:
     )
 
     from ..animation.animation import Animation
-    from ..renderer.cairo.camera import Camera
+    from ..camera import Camera
 
 
 _TimeBasedUpdater: TypeAlias = Callable[["Mobject", float], object]
@@ -1085,8 +1085,8 @@ class Mobject:
         :class:`.Camera`. To use a scene's current view, pass ``camera=scene.camera``.
         """
         # Import here: the renderer and camera modules import this module.
+        from manim.camera import Camera
         from manim.renderer.cairo import CairoRenderer
-        from manim.renderer.cairo.camera import Camera
 
         renderer = CairoRenderer(camera=Camera() if camera is None else camera)
         try:

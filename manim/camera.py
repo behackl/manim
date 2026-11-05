@@ -1,4 +1,6 @@
-"""Camera views and projection controls for the Cairo renderer."""
+"""The scene's cameras: the animatable frame, and the projection controls of
+:class:`ThreeDCamera`.
+"""
 
 from __future__ import annotations
 
@@ -67,7 +69,7 @@ class _CameraFrame(ScreenRectangle):
 
 
 class Camera:
-    """Configure the camera view and background for Cairo rendering.
+    """Configure the camera view and background.
 
     A camera has an animatable frame, background settings, and methods for ordering
     and projecting mobjects. The renderer is responsible for drawing this view

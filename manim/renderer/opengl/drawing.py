@@ -21,7 +21,7 @@ import numpy as np
 from PIL.Image import Resampling
 
 from manim._config import config
-from manim.renderer.cairo.camera import ThreeDCamera
+from manim.camera import ThreeDCamera
 from manim.renderer.cairo.mesh_faces import face_colours, face_outlines
 from manim.renderer.snapshot import RCameraView, RImage, RMesh, RNode, RPath, RPoints
 
@@ -29,7 +29,7 @@ from .shader import Shader
 from .winding_fill import WindingFill
 
 if TYPE_CHECKING:
-    from manim.renderer.cairo.camera import Camera
+    from manim.camera import Camera
 
     from .renderer import OpenGLRenderer, _CameraView
 

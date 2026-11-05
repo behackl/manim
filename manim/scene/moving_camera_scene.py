@@ -91,7 +91,7 @@ __all__ = ["MovingCameraScene"]
 
 from typing import Any
 
-from ..renderer.cairo.camera import Camera, MovingCamera
+from ..camera import Camera, MovingCamera
 from ..scene.scene import Scene
 
 

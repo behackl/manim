@@ -12,6 +12,7 @@ import cairo
 import numpy as np
 from PIL import Image
 
+from manim.camera import Camera
 from manim.constants import CapStyleType, LineJointType
 from manim.mobject.mobject import Mobject
 from manim.mobject.types.vectorized_mobject import (
@@ -29,7 +30,6 @@ from manim.renderer.snapshot import (
 )
 from manim.utils.space_ops import cross2d
 
-from .camera import Camera
 from .mesh_faces import mesh_faces
 from .target import _CairoRenderTarget, _PathCache
 

@@ -17,7 +17,7 @@ from manim.renderer.snapshot import IDENTITY, RMesh, RNode, RPath
 from manim.utils.bezier import interpolate
 
 if TYPE_CHECKING:
-    from .camera import Camera
+    from manim.camera import Camera
 
 __all__ = ["face_colours", "face_outlines", "mesh_faces"]
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import threading
-import time
 import typing
 import weakref
 from typing import TYPE_CHECKING, Any
@@ -14,7 +13,6 @@ from PIL import Image
 
 from manim._config import config, logger
 from manim.typing import Point3D
-from manim.utils.iterables import list_update
 
 from ...camera import Camera
 from ...constants import *
@@ -45,23 +43,17 @@ _active_context = threading.local()
 
 
 class OpenGLRenderer:
-    """
-    An OpenGL-based renderer.
+    """A renderer drawing with OpenGL, which can show frames in a preview window.
+
+    Frames are drawn offscreen at the scene's pixel size; :meth:`present` shows the
+    last one in the window.
 
     Attributes
     ----------
-    animation_elapsed_time : float
-        The elapsed time of the current animation.
-    animation_start_time : float
-        The start time of the current animation.
     anti_alias_width : float
         The width used for anti-aliasing in pixel units.
-    camera : Camera
-        The camera used for rendering: the same camera classes as the Cairo renderer.
-    pressed_keys : set[int]
-        Set of currently pressed key codes.
     window : Window | None
-        The window used for previewing, if any.
+        The preview window, if any.
     """
 
     capabilities = RendererCapabilities(live_preview=True)
@@ -72,9 +64,6 @@ class OpenGLRenderer:
         # Measured in pixel widths, used for vector graphics; part of cache_identity.
         self.anti_alias_width = 1.5
 
-        self.animation_start_time = 0.0
-        self.animation_elapsed_time = 0.0
-
         #: The camera of the scene drawn with this renderer, set by the scene.
         self.camera: Camera = Camera()
         self.perspective_uniforms: dict[str, Any] = {}
@@ -83,7 +72,6 @@ class OpenGLRenderer:
         self._snapshot_drawing = SnapshotDrawing(self)
         self._frame_builder: FrameBuilder | None = None
         self._camera_view_targets: dict[int, _ViewTarget] = {}
-        self.pressed_keys: set[int] = set()
         self.window: Window | None = None
         self._context: moderngl.Context | None = None
         self._frame_buffer_object: Framebuffer | None = None
@@ -104,7 +92,7 @@ class OpenGLRenderer:
         session_spec: RenderSessionSpec,
     ) -> None:
         """
-        Attach a scene and save its pixel dimensions and preview-window settings.
+        Save the scene's pixel dimensions and preview-window settings.
 
         :meth:`open` uses these settings to create the OpenGL context and
         framebuffer. The manager calls it before the scene's ``setup()`` method;
@@ -117,11 +105,9 @@ class OpenGLRenderer:
             The scene to be rendered
         """
         self._ensure_not_closed()
-        if hasattr(self, "scene"):
-            raise RuntimeError("This renderer is already bound to a Scene.")
-        self.partial_movie_files: list[str | None] = []
-        self.scene = scene
-
+        # The window sends input to the scene and shows it as its camera sees it.
+        self._window_input = scene
+        self._window_camera = scene.camera
         self._pixel_size = (int(config.pixel_width), int(config.pixel_height))
         self._wireframe = config.enable_wireframe
         self._window_settings = (
@@ -163,24 +149,28 @@ class OpenGLRenderer:
                 # Import here: only preview windows need pyglet and screeninfo.
                 from .window import Window
 
-                window = Window(self, _settings=self._window_settings)
+                window = Window(
+                    self._window_input,
+                    to_scene=self._scene_point,
+                    _settings=self._window_settings,
+                )
                 resources.callback(window.close)
-                # Closing the window also releases its context and default framebuffer.
+                # Closing the window also releases its context.
                 context = window.ctx
-                frame = context.detect_framebuffer()
             else:
                 try:
                     context = moderngl.create_context(standalone=True)
                 except Exception:
                     context = moderngl.create_context(standalone=True, backend="egl")
                 resources.callback(context.release)
-                frame = self.get_frame_buffer_object(context, 0, size=self._pixel_size)
-                for color in frame.color_attachments:
-                    resources.callback(color.release)
-                if frame.depth_attachment is not None:
-                    resources.callback(frame.depth_attachment.release)
-                resources.callback(frame.release)
-                frame.use()
+            # Frames are drawn offscreen at the scene's size; a window shows them.
+            frame = self.get_frame_buffer_object(context, 0, size=self._pixel_size)
+            for color in frame.color_attachments:
+                resources.callback(color.release)
+            if frame.depth_attachment is not None:
+                resources.callback(frame.depth_attachment.release)
+            resources.callback(frame.release)
+            frame.use()
             context.enable(moderngl.BLEND)
             context.wireframe = self._wireframe
             context.blend_func = (
@@ -289,7 +279,6 @@ class OpenGLRenderer:
             self._resources.pop_all()
             if self.window is not None and self.window._window.context is not None:
                 release(self.window.close)
-        self.pressed_keys.clear()
         self._resources = contextlib.ExitStack()
         host_still_alive = (
             not isinstance(self._context.mglo, moderngl.InvalidObject)
@@ -396,7 +385,7 @@ class OpenGLRenderer:
         """Draw ``nodes`` as ``config`` sets them up; return the pixels.
 
         The picture is drawn into the renderer's framebuffer, which a preview
-        window shows (see :meth:`_present_frame`).
+        window shows (see :meth:`present`).
         """
         self._draw(nodes, config)
         return self.get_frame()
@@ -452,11 +441,6 @@ class OpenGLRenderer:
             self._camera_view_targets.pop(uid).release()
         return textures
 
-    def _frames(self) -> FrameBuilder:
-        if self._frame_builder is None:
-            self._frame_builder = FrameBuilder(*self.pixel_size)
-        return self._frame_builder
-
     @property
     def pixel_size(self) -> tuple[int, int]:
         """The width and height in pixels of frames drawn for a scene."""
@@ -464,55 +448,25 @@ class OpenGLRenderer:
 
     def _start_animation(self) -> None:
         self.open()
-        self.animation_start_time = time.time()
 
-    def _present_frozen_frame(self, scene: Scene, duration: float) -> None:
+    def present(self) -> None:
+        """Show the last frame drawn in the preview window, if there is one."""
         if self.window is not None:
-            self.window.swap_buffers()
-            while time.time() - self.animation_start_time < duration:
-                pass
-        self.animation_elapsed_time = duration
+            self.window.show(self.frame_buffer_object)
+            self._activate_context()
 
-    def clear_screen(self) -> None:
+    def _scene_point(self, x: float, y: float, relative: bool) -> Point3D:
+        """The scene point at a window position given as fractions of its width and
+        height from the bottom left; with ``relative``, the scene offset of a move
+        by those fractions.
         """
-        Clears the current frame buffer and updates the display window
-        accordingly.
-
-        The screen is cleared using the camera's background color.
-        """
-        self.frame_buffer_object.clear(*_camera_background_rgba(self.camera))
-        if self.window is None:
-            return
-        self.window.swap_buffers()
-
-    def render_scene(self, scene: Scene, frame_offset: float) -> None:
-        """Draw a frame of the scene's current state into the framebuffer."""
-        self.update_frame(scene)
-
-    def _note_drawn(self) -> None:
-        """Note the wall-clock time of a frame drawn for the preview window."""
-        self.animation_elapsed_time = time.time() - self.animation_start_time
-
-    def _present_frame(self, scene: Scene, frame_offset: float) -> None:
-        """Refresh the preview window until wall-clock time reaches the frame offset."""
-        if self.window is not None:
-            self.window.swap_buffers()
-            while self.animation_elapsed_time < frame_offset:
-                self.update_frame(scene)
-                self.window.swap_buffers()
-
-    def update_frame(self, scene: Scene) -> None:
-        """Draw a frame of the scene's current state into the framebuffer, and
-        note the wall-clock time for pacing the preview window.
-        """
-        self._draw_scene(scene)
-        self.animation_elapsed_time = time.time() - self.animation_start_time
-
-    def _draw_scene(self, scene: Scene) -> None:
-        self._draw(
-            *self._frames().build(
-                self.camera, list_update(scene.mobjects, scene.foreground_mobjects)
-            )
+        view = _CameraView.of(self._window_camera._state())
+        width, height = view.frame_shape
+        offset = np.array([x * width, y * height, 0.0])
+        if relative:
+            return typing.cast(Point3D, offset)
+        return typing.cast(
+            Point3D, view.center + offset - np.array([width / 2, height / 2, 0.0])
         )
 
     @contextlib.contextmanager
@@ -754,63 +708,6 @@ class OpenGLRenderer:
         result_dimensions = (pixel_shape[1], pixel_shape[0], 4)
         np_buf = np.frombuffer(raw, dtype="uint8").reshape(result_dimensions)
         return np.flipud(np_buf).copy()
-
-    # Returns offset from the bottom left corner in pixels.
-    # top_left flag should be set to True when using a GUI framework
-    # where the (0,0) is at the top left: e.g. PySide6
-    def pixel_coords_to_space_coords(
-        self, px: float, py: float, relative: bool = False, top_left: bool = False
-    ) -> Point3D:
-        """
-        Converts pixel coordinates to space (scene) coordinates.
-
-        top_left flag should be set to True when using a GUI framework
-        where the (0,0) is at the top left: e.g. PySide6.
-
-        Parameters
-        ----------
-        px : float
-            The x-coordinate in pixel space.
-        py : float
-            The y-coordinate in pixel space.
-        relative : bool, optional
-            If True, returns coordinates relative to the frame (normalized to [-1, 1]).
-            If False, returns absolute space coordinates. Default is False.
-        top_left : bool, optional
-            If True, treats the origin (0, 0) as the top-left corner of the pixel space.
-            If False, treats the origin as the bottom-left. Default is False.
-
-        Returns
-        -------
-        Point3D
-            The corresponding coordinates in space as a NumPy array of shape (3,).
-
-        Notes
-        -----
-        If the pixel shape is not available, returns the origin [0, 0, 0].
-        """
-        pixel_shape = self.get_pixel_shape()
-        if pixel_shape is None:
-            return typing.cast(Point3D, np.array([0.0, 0.0, 0.0]))
-        pixel_width, pixel_height = pixel_shape
-        view = _CameraView.of(self.camera._state())
-        frame_height = view.frame_shape[1]
-        frame_center = view.center
-        if relative:
-            # relative -> just normalize to [-1, 1]
-            return 2 * np.array([px / pixel_width, py / pixel_height, 0])
-
-        scale = frame_height / pixel_height
-        y_direction = -1 if top_left else 1
-
-        return typing.cast(
-            Point3D,
-            frame_center
-            + scale
-            * np.array(
-                [(px - pixel_width / 2), y_direction * (py - pixel_height / 2), 0.0]
-            ),
-        )
 
 
 #: Focal distance standing in for "no perspective" (a camera without rotation).

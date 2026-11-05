@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     import numpy as np
 
     from manim.renderer.snapshot import RNode
-    from manim.scene.scene import Scene
     from manim.typing import Point3D, RGBAPixelArray
     from manim.utils.color import ManimColor
 
@@ -107,22 +106,3 @@ class Renderer(Protocol):
     def close(self) -> None:
         """Release what the renderer holds; it does not draw afterwards."""
         ...
-
-
-class _AnimationRenderer(Protocol):
-    """Draw frames and display them in a preview window at Manager's request.
-
-    Manager prepares animations, checks the cache, advances animation time, and
-    sends frames to the writer. The renderer prepares its drawing resources and
-    uses wall-clock time to pace its live preview.
-    """
-
-    def _start_animation(self) -> None: ...
-
-    def render(self, scene: Scene, frame_offset: float, /) -> None: ...
-
-    def get_frame(self) -> RGBAPixelArray: ...
-
-    def _present_frame(self, scene: Scene, frame_offset: float) -> None: ...
-
-    def _present_frozen_frame(self, scene: Scene, duration: float) -> None: ...

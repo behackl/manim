@@ -1457,7 +1457,6 @@ class Scene:
                 else:
                     action.method(*action.args, **action.kwargs)
             else:
-                self.renderer.animation_start_time = 0
                 dt = time.time() - last_time
                 last_time = time.time()
                 self._get_manager()._render_preview_frame(dt)
@@ -1492,7 +1491,6 @@ class Scene:
             logger.warning("embed() is skipped while writing to a file.")
             return
 
-        self.renderer.animation_start_time = 0
         self._get_manager()._render_preview_frame(-1)
 
         # Configure IPython shell.
@@ -1714,7 +1712,8 @@ class Scene:
     def on_mouse_motion(self, point: Point3D, d_point: Point3D) -> None:
         assert isinstance(self.renderer, OpenGLRenderer)
         self.mouse_point.move_to(point)
-        if SHIFT_VALUE in self.renderer.pressed_keys:
+        window = self.renderer.window
+        if window is not None and SHIFT_VALUE in window.pressed_keys:
             self._pan_camera(d_point)
 
     def on_mouse_scroll(self, point: Point3D, offset: Point3D) -> None:

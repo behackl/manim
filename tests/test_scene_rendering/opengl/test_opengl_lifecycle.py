@@ -102,7 +102,7 @@ def test_cold_snapshot_never_opens_preview_and_restores_previous_host(
 
     first = scene_factory()
     first.add(Square(fill_color=RED, fill_opacity=1))
-    first.renderer.update_frame(first)
+    first.renderer.render(*first._get_manager()._frame())
     target = first.renderer.frame_buffer_object
     before = target.read(components=4)
     with tempconfig({"live_preview": True}):

@@ -650,6 +650,7 @@ class Manager(Generic[SceneT]):
         """
         if self.session_spec.presentation.live_preview:
             self.renderer.render(*self._frame())
+            self.renderer.present()
 
     def tear_down(self) -> None:
         """Run the managed scene's :meth:`~manim.scene.scene.Scene.tear_down` hook."""
@@ -787,18 +788,11 @@ class Manager(Generic[SceneT]):
 
     @cached_property
     def _wants_frame_pixels(self) -> bool:
-        """Whether the file writer is given the pixels of drawn frames.
-
-        Reading pixels back is cheap for Cairo, and test writers record them
-        even without file output. OpenGL reads them back only for video and
-        image-sequence output.
+        """Whether the output takes the frames of plays: video and image
+        sequences do; still images and no output do not.
         """
         output = self.output_spec
-        return (
-            isinstance(self.renderer, CairoRenderer)
-            or output.is_video
-            or output.is_image_sequence
-        )
+        return output.is_video or output.is_image_sequence
 
     def _render_preview_frame(self, frame_offset: float) -> None:
         """Draw and show the current state without advancing animation time.
@@ -812,7 +806,7 @@ class Manager(Generic[SceneT]):
             return
         if self._wants_frame_pixels:
             self.file_writer.write_frame(pixels)
-        self.renderer._present_frame(self.scene, frame_offset)
+        self.renderer.present()
 
     def next_section(
         self,

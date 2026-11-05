@@ -154,9 +154,6 @@ class _TargetDrawer:
             renderer._start_animation()
             self._prepared = True
         self._pixels = renderer.render(*self._manager._frame())
-        note_drawn = getattr(renderer, "_note_drawn", None)
-        if note_drawn is not None:
-            note_drawn()
 
     def pixels(self, frame: _Frame) -> RGBAPixelArray:
         assert self._pixels is not None

@@ -24,7 +24,7 @@ def test_preview_presents_without_advancing_time(scene, monkeypatch):
     monkeypatch.setattr(scene.renderer, "window", window)
     manager._render_preview_frame(-1)
     draw.assert_called_once()
-    window.swap_buffers.assert_called_once_with()
+    window.show.assert_called_once()
     assert scene.time == 2
 
 
@@ -54,3 +54,31 @@ def test_interactive_idle_redraw_uses_manager(scene, monkeypatch):
     scene.interact(Mock(pt_app=None), Mock())
     redraw.assert_called_once()
     assert scene.time == 0
+
+
+def test_renders_without_a_live_preview_are_not_paced(tmp_path, monkeypatch):
+    # The preview waits for wall-clock time; without one, nothing should wait.
+    from manim import Square, Wait
+
+    class OneSecond(Scene):
+        def construct(self):
+            self.add(Square())
+            self.play(Wait(1))
+
+    settings = {
+        "renderer": "opengl",
+        "format": "png_sequence",
+        "live_preview": False,
+        "frame_rate": 4,
+        "pixel_width": 32,
+        "pixel_height": 18,
+        "media_dir": str(tmp_path),
+        "disable_caching": True,
+        "progress_bar": "none",
+    }
+    with tempconfig(settings):
+        scene = OneSecond()
+        present = Mock()
+        monkeypatch.setattr(scene.renderer, "present", present)
+        scene.render()
+    present.assert_not_called()

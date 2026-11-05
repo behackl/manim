@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import platform
-from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -18,7 +17,6 @@ def test_file_output_disables_window(
     """File output should disable the window by default."""
     scene = SquareToCircle()
     renderer = scene.renderer
-    renderer.update_frame = Mock(wraps=renderer.update_frame)
     scene.render()
     assert renderer.window is None
     assert_file_exists(scene._get_manager().file_writer.final_file_path)
@@ -34,7 +32,6 @@ def test_live_preview_opengl_render_with_movies(
     """Live preview can be displayed while movie output is enabled."""
     scene = SquareToCircle()
     renderer = scene.renderer
-    renderer.update_frame = Mock(wraps=renderer.update_frame)
     with scene._get_manager():
         scene.render()
         assert renderer.window is not None
@@ -53,91 +50,61 @@ def test_live_preview_opengl_render_with_image_sequence(
     """Live preview can be displayed while an image sequence is written."""
     scene = SquareToCircle()
     renderer = scene.renderer
-    renderer.update_frame = Mock(wraps=renderer.update_frame)
     with scene._get_manager():
         scene.render()
         assert renderer.window is not None
     assert renderer.window is None
 
 
-def test_get_frame_with_live_preview_disabled(config, using_opengl_renderer):
-    """Get frame has the correct dimensions without a live preview."""
+def test_frames_have_the_scene_size_without_a_live_preview(
+    config, using_opengl_renderer
+):
     config.live_preview = False
-
     scene = SquareToCircle()
     assert isinstance(scene.renderer, OpenGLRenderer)
-    assert not config.live_preview
 
-    renderer = scene.renderer
-    renderer.update_frame(scene)
-    frame = renderer.get_frame()
+    frame = scene.renderer.render(*scene._get_manager()._frame())
 
-    # height and width are flipped
-    assert renderer.get_pixel_shape()[0] == frame.shape[1]
-    assert renderer.get_pixel_shape()[1] == frame.shape[0]
+    assert frame.shape == (config.pixel_height, config.pixel_width, 4)
     assert frame.dtype == np.uint8
     assert frame.flags.c_contiguous
 
 
 @pytest.mark.slow
-def test_get_frame_with_live_preview_enabled(config, using_opengl_renderer):
-    """Get frame has the correct dimensions with a live preview."""
+def test_frames_have_the_scene_size_with_a_live_preview(config, using_opengl_renderer):
+    # The window can have any size; frames are drawn offscreen at the scene's.
     config.live_preview = True
+    config.window_size = (100, 300)
 
     scene = SquareToCircle()
-    assert isinstance(scene.renderer, OpenGLRenderer)
-    assert config.live_preview is True
-
     renderer = scene.renderer
-    assert renderer.window is None
     renderer.open()
-    assert renderer.window is not None
-    assert not scene._get_manager().file_writer.output_spec.enabled
-    renderer.update_frame(scene)
-    frame = renderer.get_frame()
-
-    # height and width are flipped
-    assert renderer.get_pixel_shape()[0] == frame.shape[1]
-    assert renderer.get_pixel_shape()[1] == frame.shape[0]
-    assert frame.dtype == np.uint8
-    assert frame.flags.c_contiguous
     try:
-        elapsed = renderer.animation_elapsed_time
+        assert renderer.window is not None
+        frame = renderer.render(*scene._get_manager()._frame())
+        assert frame.shape == (config.pixel_height, config.pixel_width, 4)
+        renderer.present()
         scene.add(Square(fill_opacity=1))
         image = scene.get_image()
-        assert image.size == renderer.get_pixel_shape()
+        assert image.size == (config.pixel_width, config.pixel_height)
         assert not np.array_equal(image, frame)
-        np.testing.assert_array_equal(renderer.get_frame(), frame)
-        assert renderer.animation_elapsed_time == elapsed
     finally:
-        renderer.window.close()
+        renderer.close()
 
 
-def test_pixel_coords_to_space_coords(config, using_opengl_renderer):
+def test_window_positions_map_to_scene_points(config, using_opengl_renderer):
     config.live_preview = False
-
     scene = SquareToCircle()
-    assert isinstance(scene.renderer, OpenGLRenderer)
-
+    scene.camera.frame.shift(RIGHT)
     renderer = scene.renderer
-    renderer.update_frame(scene)
+    width, height = scene.camera.frame_width, scene.camera.frame_height
+    center = scene.camera.frame_center
 
-    px, py = 3, 2
-    pw, ph = renderer.get_pixel_shape()
-    fh = renderer.camera.frame_height
-    fc = renderer.camera.frame_center
-
-    ex = fc[0] + (fh / ph) * (px - pw / 2)
-    ey = fc[1] + (fh / ph) * (py - ph / 2)
-    ez = fc[2]
-
-    assert (
-        renderer.pixel_coords_to_space_coords(px, py) == np.array([ex, ey, ez])
-    ).all()
-    assert (
-        renderer.pixel_coords_to_space_coords(px, py, top_left=True)
-        == np.array([ex, -ey, ez])
-    ).all()
+    np.testing.assert_allclose(renderer._scene_point(0.5, 0.5, False), center)
+    np.testing.assert_allclose(
+        renderer._scene_point(0, 1, False), center + [-width / 2, height / 2, 0]
+    )
+    np.testing.assert_allclose(renderer._scene_point(0.25, 0, True), [width / 4, 0, 0])
 
 
 def test_moving_camera_frame_animates(config, using_opengl_renderer):
@@ -153,3 +120,21 @@ def test_moving_camera_frame_animates(config, using_opengl_renderer):
     scene = PanAndZoom()
     scene.render()
     np.testing.assert_allclose(scene.camera.frame_center, RIGHT, atol=1e-12)
+
+
+@pytest.mark.slow
+def test_movies_are_written_at_the_scene_size_with_a_live_preview(
+    config, using_opengl_renderer, tmp_path
+):
+    # The window has another size than the movie; it used to be drawn into.
+    config.live_preview = True
+    config.format = "mp4"
+    config.window_size = (100, 300)
+    config.media_dir = str(tmp_path)
+    config.disable_caching = True
+
+    scene = SquareToCircle()
+    with scene._get_manager() as manager:
+        manager.render()
+        assert scene.renderer.window is not None
+        assert_file_exists(manager.file_writer.final_file_path)

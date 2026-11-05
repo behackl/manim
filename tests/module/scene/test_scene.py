@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import datetime
 
+import numpy as np
 import pytest
 
 from manim import (
+    RIGHT,
+    CairoRenderer,
     Circle,
     Dot,
     FadeIn,
     Group,
     Mobject,
+    MovingCamera,
+    MovingCameraScene,
     Scene,
     Square,
 )
@@ -154,3 +159,12 @@ def test_random_color_reproducibility_with_seed(dry_run):
 
         # The interrupted colors should be different (seeded with 999)
         assert colors_interrupted != colors_first_run[:3]
+
+
+def test_the_scene_owns_its_camera(dry_run):
+    scene = MovingCameraScene(renderer=CairoRenderer())
+    assert isinstance(scene.camera, MovingCamera)
+    assert scene._get_manager().camera is scene.camera
+    scene.add(Square(fill_opacity=1))
+    scene.camera.frame.shift(10 * RIGHT)  # the square leaves the view
+    assert not np.asarray(scene.get_image())[..., :3].any()

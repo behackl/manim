@@ -14,7 +14,7 @@ from manim.mobject.graphing.coordinate_systems import ThreeDAxes
 from manim.mobject.three_d.three_dimensions import Sphere
 from manim.mobject.value_tracker import ValueTracker
 
-from .. import config
+from .._config import config
 from ..animation.animation import Animation
 from ..constants import DEGREES
 from ..mobject.mobject import Mobject

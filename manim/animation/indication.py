@@ -50,7 +50,7 @@ from manim.mobject.geometry.polygram import Rectangle
 from manim.mobject.geometry.shape_matchers import SurroundingRectangle
 from manim.scene.scene import Scene
 
-from .. import config
+from .._config import config
 from ..animation.animation import Animation
 from ..animation.composition import AnimationGroup, Succession
 from ..animation.creation import Create, ShowPartial, Uncreate

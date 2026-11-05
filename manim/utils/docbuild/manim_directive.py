@@ -95,8 +95,8 @@ from docutils import nodes
 from docutils.parsers.rst import Directive, directives
 from docutils.statemachine import StringList
 
-from manim import QUALITIES
-from manim import __version__ as manim_version
+from manim._version import __version__ as manim_version
+from manim.constants import QUALITIES
 
 if TYPE_CHECKING:
     from sphinx.application import Sphinx
@@ -211,7 +211,7 @@ class ManimDirective(Directive):
             )
             return [node]
 
-        from manim import config, tempconfig
+        from manim._config import config, tempconfig
 
         global classnamedict
 

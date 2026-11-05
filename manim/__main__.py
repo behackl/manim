@@ -3,8 +3,8 @@ from __future__ import annotations
 import click
 import cloup
 
-from manim import __version__
 from manim._config import cli_ctx_settings, console
+from manim._version import __version__
 from manim.cli.cache.commands import cache
 from manim.cli.cfg.group import cfg
 from manim.cli.checkhealth.commands import checkhealth

@@ -24,7 +24,7 @@ import numpy as np
 
 from manim.data_structures import MethodWithArgs
 
-from .. import config, logger
+from .._config import config, logger
 from ..constants import *
 from ..utils.color import (
     BLACK,

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from . import config, logger
+from ._config import config, logger
 from ._config.logger_utils import set_file_logger
 from ._run.listeners import (
     _Encoder,

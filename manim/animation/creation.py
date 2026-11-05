@@ -89,7 +89,7 @@ if TYPE_CHECKING:
 from manim.constants import RIGHT, TAU
 from manim.utils.color import ManimColor
 
-from .. import config
+from .._config import config
 from ..animation.animation import Animation
 from ..animation.composition import Succession
 from ..mobject.mobject import Group, Mobject

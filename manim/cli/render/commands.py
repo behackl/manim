@@ -19,7 +19,6 @@ from typing import Any, cast
 
 import cloup
 
-from manim import __version__
 from manim._config import (
     config,
     console,
@@ -27,6 +26,7 @@ from manim._config import (
     logger,
     tempconfig,
 )
+from manim._version import __version__
 from manim.cli.render.ease_of_access_options import ease_of_access_options
 from manim.cli.render.global_options import global_options
 from manim.cli.render.output_options import output_options

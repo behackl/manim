@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .. import logger
+from .._config import logger
 from ..mobject import mobject
 from ..mobject.mobject import Group, Mobject
 from ..utils.rate_functions import linear, smooth

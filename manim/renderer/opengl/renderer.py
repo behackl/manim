@@ -12,7 +12,7 @@ import numpy as np
 from moderngl import Framebuffer
 from PIL import Image
 
-from manim import config, logger
+from manim._config import config, logger
 from manim.renderer.snapshot import extract
 from manim.typing import Point3D
 from manim.utils.color import color_to_rgba

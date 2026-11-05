@@ -20,7 +20,7 @@ import moderngl
 import numpy as np
 from PIL.Image import Resampling
 
-from manim import config
+from manim._config import config
 from manim.renderer.cairo.camera import ThreeDCamera
 from manim.renderer.cairo.mesh_faces import face_colours, face_outlines
 from manim.renderer.snapshot import RCameraView, RImage, RMesh, RNode, RPath, RPoints

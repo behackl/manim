@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import srt
 
-from .. import config, logger
+from .._config import config, logger
 from .._config.video_encoder import video_encoder_fingerprint
 from ..utils.hashing import get_hash_from_play_call
 from .loop import _Caption, _RunListener, _Section, _Sound

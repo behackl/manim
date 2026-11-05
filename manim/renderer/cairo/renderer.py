@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from PIL import Image
 
-from ... import config
+from ..._config import config
 from ..._run.frames import frame_count
 from ...mobject.mobject import Mobject, _AnimationBuilder
 from ...mobject.types.image_mobject import ImageMobjectFromCamera

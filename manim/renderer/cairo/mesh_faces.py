@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from manim import config
+from manim._config import config
 from manim.constants import CapStyleType, LineJointType
 from manim.renderer.snapshot import IDENTITY, RMesh, RNode, RPath
 from manim.utils.bezier import interpolate

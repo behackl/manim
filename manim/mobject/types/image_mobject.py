@@ -13,7 +13,7 @@ from PIL.Image import Resampling
 
 from manim.mobject.geometry.shape_matchers import SurroundingRectangle
 
-from ... import config
+from ..._config import config
 from ...constants import *
 from ...mobject.fields import ArrayField, Field
 from ...mobject.mobject import Mobject

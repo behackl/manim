@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
 
 import numpy as np
 
-from manim import constants
+import manim.constants as constants
 from manim._config.output import OutputFormat
 from manim.constants import RendererType
 from manim.utils.color import ManimColor

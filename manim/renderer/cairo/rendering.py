@@ -78,18 +78,16 @@ class _CairoDrawingContext:
         self.image_resolver = image_resolver
         self._path_cache: _PathCache | None = None
 
-    def draw(
+    def nodes(
         self,
         mobjects: Iterable[Mobject],
         *,
         include_submobjects: bool = True,
         excluded_mobjects: list[Mobject] | None = None,
-    ) -> None:
-        self.target._ensure_open()
-        # Paths can be cached only if the camera draws points where they are.
-        self._path_cache = None if _view.is_3d(self.camera) else self.target.path_cache
-        if self._path_cache is not None:
-            self._path_cache.next_generation()
+    ) -> list[RNode]:
+        """The snapshots to draw for ``mobjects``, in drawing order: meshes as
+        their faces, sorted by depth for a perspective view.
+        """
         nodes = []
         for node in extract(
             mobjects,
@@ -101,7 +99,39 @@ class _CairoDrawingContext:
                 nodes.extend(mesh_faces(node, self.camera))
             else:
                 nodes.append(node)
-        nodes = _view.sort_for_display(self.camera, nodes)
+        return _view.sort_for_display(self.camera, nodes)
+
+    def draw(
+        self,
+        mobjects: Iterable[Mobject],
+        *,
+        include_submobjects: bool = True,
+        excluded_mobjects: list[Mobject] | None = None,
+    ) -> None:
+        self.start_frame()
+        self.draw_nodes(
+            self.nodes(
+                mobjects,
+                include_submobjects=include_submobjects,
+                excluded_mobjects=excluded_mobjects,
+            )
+        )
+
+    def start_frame(self) -> None:
+        """Begin a frame of the target: paths cached in the frame before last and
+        not drawn since are dropped.
+        """
+        self.target._ensure_open()
+        # Paths can be cached only if the camera draws points where they are.
+        self._path_cache = None if _view.is_3d(self.camera) else self.target.path_cache
+        if self._path_cache is not None:
+            self._path_cache.next_generation()
+
+    def draw_nodes(self, nodes: list[RNode]) -> None:
+        """Draw ``nodes`` in order over what the target holds (after
+        :meth:`start_frame`).
+        """
+        self.target._ensure_open()
         for payload_type, group in it.groupby(nodes, lambda node: type(node.payload)):
             if payload_type is RPath:
                 self._display_paths(list(group))
@@ -499,3 +529,24 @@ class _CairoDrawingContext:
 def _background_image(node: RNode) -> Any:
     path: RPath = node.payload  # type: ignore[assignment]
     return path.background_image
+
+
+def reusable_boundary(nodes: list[RNode], count: int) -> int:
+    """The largest ``k <= count`` such that drawing ``nodes[:k]`` and then the rest
+    gives the same pixels as drawing all at once.
+
+    Paths with one background image are drawn together, as a mask over the image;
+    a run of them is not split.
+    """
+    image = _background_image_of
+    while 0 < count < len(nodes):
+        before, after = image(nodes[count - 1]), image(nodes[count])
+        if before is None or before is not after:
+            break
+        count -= 1
+    return count
+
+
+def _background_image_of(node: RNode) -> Any:
+    payload = node.payload
+    return payload.background_image if isinstance(payload, RPath) else None

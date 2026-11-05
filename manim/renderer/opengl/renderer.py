@@ -28,7 +28,7 @@ from .shader import shader_program_cache
 from .window_settings import _WindowSettings
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator
+    from collections.abc import Callable, Iterator
 
     from manim._config.render_session import RenderSessionSpec
     from manim.animation.animation import Animation
@@ -109,8 +109,6 @@ class OpenGLRenderer(_RendererExecutionView):
         self.camera_view: _CameraView = _CameraView.of(self.camera._state())
         self._snapshot_drawing = SnapshotDrawing(self)
         self._camera_view_targets: dict[int, _ViewTarget] = {}
-        self._static_layer: _StaticLayer | None = None
-        self._moving_mobjects: list[Mobject] | None = None
         self.pressed_keys: set[int] = set()
         self.window: Window | None = None
         self._context: moderngl.Context | None = None
@@ -452,6 +450,7 @@ class OpenGLRenderer(_RendererExecutionView):
             _views.sort_for_display(self._camera_state, nodes),
             self._frame_target(),
             views,
+            background=self._background_rgba(),
         )
 
     def _draw_camera_views(self, mobjects: list[Mobject]) -> dict[int, Any]:
@@ -547,44 +546,6 @@ class OpenGLRenderer(_RendererExecutionView):
         self.open()
         self.animation_start_time = time.time()
 
-    def _prepare_animation(self, scene: Scene) -> None:
-        """Draw the mobjects that do not move during the animation once.
-
-        Like the static image of the Cairo renderer: each frame then starts from a
-        copy of their drawing and only the moving mobjects are drawn over it, while
-        the camera's view stays the same.
-        """
-        self.static_image = None
-        static = scene.static_mobjects
-        if not static or isinstance(self.camera, MultiCamera):
-            return
-        self.open()
-        self.refresh_perspective_uniforms(self.camera)
-        target = self._frame_target()
-        layer = _StaticLayer(self, target.size)
-        layer.framebuffer.clear(*self._background_rgba())
-        nodes = extract(static, use_z_index=self.camera.use_z_index)
-        layer.drawing.draw(
-            _views.sort_for_display(self._camera_state, nodes),
-            target._replace(framebuffer=layer.framebuffer),
-        )
-        layer.view = _view_key(target.view, target.size)
-        self._static_layer = layer
-
-    @property
-    def static_image(self) -> None:
-        """Set to ``None`` to stop starting frames from the static mobjects."""
-        return None
-
-    @static_image.setter
-    def static_image(self, value: None) -> None:
-        if value is not None:
-            raise ValueError("The static image can only be reset to None.")
-        if self._static_layer is not None:
-            self._static_layer.release()
-            self._static_layer = None
-        self._moving_mobjects = None
-
     def _present_frozen_frame(self, scene: Scene, duration: float) -> None:
         if self.window is not None:
             self.window.swap_buffers()
@@ -604,9 +565,7 @@ class OpenGLRenderer(_RendererExecutionView):
             return
         self.window.swap_buffers()
 
-    def render(
-        self, scene: Scene, frame_offset: float, moving_mobjects: list[Mobject]
-    ) -> None:
+    def render(self, scene: Scene, frame_offset: float) -> None:
         """Draw a single frame of the scene's current state using OpenGL.
 
         Parameters
@@ -616,9 +575,6 @@ class OpenGLRenderer(_RendererExecutionView):
         frame_offset
             Animation-relative time in seconds. Accepted for the common renderer
             interface; drawing itself does not use this value.
-        moving_mobjects
-            The mobjects that may change during the current animation; the others
-            were drawn once by :meth:`_prepare_animation`.
 
         Notes
         -----
@@ -626,7 +582,6 @@ class OpenGLRenderer(_RendererExecutionView):
         needed for output and displays the preview window separately. Drawing
         alone neither writes frames nor advances ``Scene.time``.
         """
-        self._moving_mobjects = moving_mobjects
         self.update_frame(scene)
 
     def _present_frame(self, scene: Scene, frame_offset: float) -> None:
@@ -660,18 +615,8 @@ class OpenGLRenderer(_RendererExecutionView):
     def _draw_scene(self, scene: Scene) -> None:
         """Draw the current objects without updating animation timing."""
         self.refresh_perspective_uniforms(self.camera)
-        target = self._frame_target()
-        static = self._static_layer
-        if (
-            static is not None
-            and self._moving_mobjects is not None
-            and static.view == _view_key(target.view, target.size)
-        ):
-            self.context.copy_framebuffer(target.framebuffer, static.framebuffer)
-            self._draw_snapshots(scene, self._moving_mobjects)
-        else:
-            self.frame_buffer_object.clear(*self._background_rgba())
-            self._draw_snapshots(scene)
+        self.frame_buffer_object.clear(*self._background_rgba())
+        self._draw_snapshots(scene)
 
     @contextlib.contextmanager
     def _scene_images(self) -> Iterator[None]:
@@ -831,11 +776,6 @@ class OpenGLRenderer(_RendererExecutionView):
             -1,  # orientation (-1 = bottom to top, 1 = top to bottom)
         )
         return image
-
-    def save_static_frame_data(
-        self, scene: Scene, static_mobjects: Iterable[Mobject]
-    ) -> None:
-        self._ensure_not_closed()
 
     def get_frame_buffer_object(
         self,
@@ -1044,38 +984,6 @@ class _CameraView(typing.NamedTuple):
             ),
             light_source=state.light,
         )
-
-
-def _view_key(view: _CameraView, size: tuple[int, int]) -> tuple[Any, ...]:
-    """What a drawing depends on about the camera, as comparable values."""
-    return (
-        size,
-        tuple(view.center),
-        tuple(view.rotation.ravel()),
-        tuple(view.frame_shape),
-        view.focal_distance,
-        tuple(view.light_source),
-    )
-
-
-class _StaticLayer:
-    """The drawing of the mobjects that do not move during an animation."""
-
-    def __init__(self, renderer: OpenGLRenderer, size: tuple[int, int]) -> None:
-        context = renderer.context
-        self.texture = context.texture(size, components=4)
-        self.depth = context.depth_renderbuffer(size)
-        self.framebuffer = context.framebuffer([self.texture], self.depth)
-        self.drawing = SnapshotDrawing(renderer)
-        self.view: Any = None
-        renderer._resources.callback(self.release)
-
-    def release(self) -> None:
-        """Release the GPU objects; safe to call more than once."""
-        self.drawing.release()
-        for resource in (self.framebuffer, self.texture, self.depth):
-            if not isinstance(resource.mglo, moderngl.InvalidObject):
-                resource.release()
 
 
 class _ViewTarget:

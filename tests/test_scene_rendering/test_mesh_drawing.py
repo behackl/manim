@@ -41,7 +41,7 @@ def _image(renderer, mobjects, scene_class=Scene, **orientation):
                 scene.set_camera_orientation(**orientation)
             scene.add(*mobjects())
             pixels = np.asarray(scene.get_image().convert("RGB"), dtype=float) / 255
-            camera = scene.renderer.camera
+            camera = scene.camera
         finally:
             scene.renderer.close()
     return pixels, camera

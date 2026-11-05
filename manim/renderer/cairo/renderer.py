@@ -4,8 +4,6 @@ import contextlib
 from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 
-from manim.camera import Camera
-
 from ..._config import config
 from .. import _view
 from .._reuse import PrefixMemo, node_key, view_key
@@ -40,8 +38,6 @@ class CairoRenderer:
         *,
         _raster_settings: _CairoRasterSettings | None = None,
     ) -> None:
-        #: The camera of the scene drawn with this renderer, set by the scene.
-        self.camera: Camera = Camera()
         self._raster_settings = _raster_settings or _CairoRasterSettings(
             pixel_width=int(config["pixel_width"]),
             pixel_height=int(config["pixel_height"]),

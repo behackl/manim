@@ -223,8 +223,6 @@ class Scene:
             self._renderer: CairoRenderer | OpenGLRenderer = CairoRenderer()
         else:
             self._renderer = renderer
-        # Until the Manager hands renderers what to draw, they read the camera.
-        self._renderer.camera = self._camera
         self.session_spec = resolve_render_session(
             config,
             self.renderer.capabilities,

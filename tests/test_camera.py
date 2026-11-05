@@ -435,7 +435,7 @@ def test_mobjects_fixed_in_frame_stay_put_when_the_camera_moves():
         try:
             renderer.render_mobjects([hud])
             before = renderer.get_frame().copy()
-            renderer.camera.frame.scale(0.5).shift(LEFT)
+            renderer.camera.frame.scale(0.5).shift(LEFT)  # the camera drawn
             renderer.render_mobjects([hud])
             np.testing.assert_array_equal(renderer.get_frame(), before)
         finally:

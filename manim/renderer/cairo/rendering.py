@@ -13,7 +13,6 @@ import numpy as np
 from PIL import Image
 
 from manim.constants import CapStyleType, LineJointType
-from manim.mobject.mobject import Mobject
 from manim.mobject.types.vectorized_mobject import (
     _points_equal_2d,
     _subpath_split_indices,
@@ -22,20 +21,16 @@ from manim.renderer import _view
 from manim.renderer.snapshot import (
     RCameraView,
     RImage,
-    RMesh,
     RNode,
     RPath,
     RPoints,
-    extract,
 )
 from manim.utils.space_ops import cross2d
 
-from .mesh_faces import mesh_faces
 from .target import _CairoRenderTarget, _PathCache
 
 if TYPE_CHECKING:
     from manim.renderer.protocol import CameraState
-    from manim.renderer.snapshot import Extractor
     from manim.typing import (
         FloatRGBA_Array,
         FloatRGBALike_Array,
@@ -63,7 +58,9 @@ _ImageResolver = Callable[[RNode], np.ndarray | None]
 
 
 class _CairoDrawingContext:
-    """Draw mobjects into one renderer-owned target, as one camera state sees them."""
+    """Draw snapshot nodes into one renderer-owned target, as one camera state
+    sees them.
+    """
 
     def __init__(
         self,
@@ -71,55 +68,11 @@ class _CairoDrawingContext:
         camera: CameraState,
         target: _CairoRenderTarget,
         image_resolver: _ImageResolver,
-        use_z_index: bool = True,
-        extractor: Extractor | None = None,
     ) -> None:
         self.camera = camera
-        self.use_z_index = use_z_index
-        self.extractor = extractor
         self.target = target
         self.image_resolver = image_resolver
         self._path_cache: _PathCache | None = None
-
-    def nodes(
-        self,
-        mobjects: Iterable[Mobject],
-        *,
-        include_submobjects: bool = True,
-        excluded_mobjects: list[Mobject] | None = None,
-    ) -> list[RNode]:
-        """The snapshots to draw for ``mobjects``, in drawing order: meshes as
-        their faces, sorted by depth for a perspective view.
-        """
-        nodes = []
-        take = extract if self.extractor is None else self.extractor.extract
-        for node in take(
-            mobjects,
-            include_submobjects=include_submobjects,
-            use_z_index=self.use_z_index,
-            excluded_mobjects=excluded_mobjects or (),
-        ):
-            if isinstance(node.payload, RMesh):
-                nodes.extend(mesh_faces(node, self.camera))
-            else:
-                nodes.append(node)
-        return _view.sort_for_display(self.camera, nodes)
-
-    def draw(
-        self,
-        mobjects: Iterable[Mobject],
-        *,
-        include_submobjects: bool = True,
-        excluded_mobjects: list[Mobject] | None = None,
-    ) -> None:
-        self.start_frame()
-        self.draw_nodes(
-            self.nodes(
-                mobjects,
-                include_submobjects=include_submobjects,
-                excluded_mobjects=excluded_mobjects,
-            )
-        )
 
     def start_frame(self) -> None:
         """Begin a frame of the target: paths cached in the frame before last and
@@ -302,7 +255,6 @@ class _CairoDrawingContext:
             camera=self.camera,
             target=scratch,
             image_resolver=self.image_resolver,
-            use_z_index=self.use_z_index,
         )
         scratch_context._display_non_background_colored_paths(nodes)
         background = self.target.get_background_image(image)

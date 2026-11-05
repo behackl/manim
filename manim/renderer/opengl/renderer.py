@@ -9,15 +9,12 @@ from typing import TYPE_CHECKING, Any
 import moderngl
 import numpy as np
 from moderngl import Framebuffer
-from PIL import Image
 
 from manim._config import config, logger
 from manim.typing import Point3D
 
-from ...camera import Camera
 from ...constants import *
 from .. import _view as _views
-from ..frame import FrameBuilder
 from ..protocol import RenderConfig, RendererCapabilities
 from .drawing import DrawTarget, SnapshotDrawing
 from .shader import shader_program_cache
@@ -64,13 +61,11 @@ class OpenGLRenderer:
         # Measured in pixel widths, used for vector graphics; part of cache_identity.
         self.anti_alias_width = 1.5
 
-        #: The camera of the scene drawn with this renderer, set by the scene.
-        self.camera: Camera = Camera()
         self.perspective_uniforms: dict[str, Any] = {}
-        self.camera_view: _CameraView = _CameraView.of(self.camera._state())
-        self._camera_state = self.camera._state()
+        # Set for each frame by _set_view.
+        self.camera_view: _CameraView
+        self._camera_state: CameraState
         self._snapshot_drawing = SnapshotDrawing(self)
-        self._frame_builder: FrameBuilder | None = None
         self._camera_view_targets: dict[int, _ViewTarget] = {}
         self.window: Window | None = None
         self._context: moderngl.Context | None = None
@@ -556,43 +551,6 @@ class OpenGLRenderer:
         finally:
             self._capturing_image = False
 
-    def get_image(self) -> Image.Image:
-        """
-        Get the current OpenGL frame buffer as a PIL Image.
-
-        Returns
-        -------
-        Image.Image
-            The image representation of the current frame buffer.
-
-        Raises
-        ------
-        ValueError
-            If the pixel shape cannot be determined.
-
-        Notes
-        -----
-        The image is constructed from raw RGBA buffer data, with the
-        origin at the bottom-left.
-        """
-        raw_buffer_data = self.get_raw_frame_buffer_object_data()
-        pixel_shape = self.get_pixel_shape()
-        if pixel_shape is None:
-            msg = "Pixel shape is None, cannot get image."
-            raise ValueError(msg)
-
-        image = Image.frombytes(
-            "RGBA",  # mode (rgb, a for alpha (transparency)))
-            pixel_shape,  # size
-            raw_buffer_data,  # data
-            "raw",  # decoder_name
-            # *args for the decoder
-            "RGBA",  # raw mode
-            0,  # stride (O = no extra padding)
-            -1,  # orientation (-1 = bottom to top, 1 = top to bottom)
-        )
-        return image
-
     def get_frame_buffer_object(
         self,
         context: moderngl.Context,
@@ -766,8 +724,3 @@ def _background_rgba(config: RenderConfig) -> tuple[float, float, float, float]:
     """The background of a frame, as the framebuffer is cleared to it."""
     r, g, b = config.background_color.to_rgb()
     return float(r), float(g), float(b), float(config.background_opacity)
-
-
-def _camera_background_rgba(camera: Camera) -> tuple[float, float, float, float]:
-    r, g, b = camera.background_color.to_rgb()
-    return float(r), float(g), float(b), float(camera.background_opacity)

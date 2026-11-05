@@ -22,3 +22,14 @@ def test_projection_and_identity_do_not_depend_on_drawing():
     camera.theta_tracker.set_value(0.4)
     assert get_json(camera) != identity
     assert not np.array_equal(before, camera.project_point(point))
+
+
+def test_points_are_projected_with_the_perspective_factor():
+    camera = ThreeDCamera(focal_distance=10.0)
+    camera.set_phi(0)
+    camera.set_theta(-np.pi / 2)
+    near = camera.project_point(np.array([1.0, 0.0, 5.0]))
+    # x and y scale by focal_distance / (focal_distance - z).
+    np.testing.assert_allclose(near[:2], [2.0, 0.0], atol=1e-12)
+    with pytest.raises(TypeError, match="exponential_projection"):
+        ThreeDCamera(exponential_projection=True)

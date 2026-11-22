@@ -139,7 +139,7 @@ def _image(renderer, build, scene_class=Scene):
     ],
     ids=lambda build: build.__name__.strip("_"),
 )
-def test_drawing_matches_cairo(opengl_common_mobjects, build):
+def test_drawing_matches_cairo(using_opengl_renderer, build):
     cairo = _image("cairo", build)
     opengl = _image("opengl", build)
 
@@ -191,7 +191,7 @@ def _fixed_in_moved_frame(scene):
     ],
     ids=["camera_view", "fixed_in_3d", "fixed_in_moved_frame"],
 )
-def test_scenes_match_cairo(opengl_common_mobjects, scene_class, build):
+def test_scenes_match_cairo(using_opengl_renderer, scene_class, build):
     cairo = _image("cairo", build, scene_class)
     opengl = _image("opengl", build, scene_class)
 
@@ -199,7 +199,7 @@ def test_scenes_match_cairo(opengl_common_mobjects, scene_class, build):
     assert np.abs(opengl - cairo).mean() < 0.01
 
 
-def test_images_that_compute_their_pixels_are_redrawn(opengl_common_mobjects):
+def test_images_that_compute_their_pixels_are_redrawn(using_opengl_renderer):
     from manim.mobject.types.image_mobject import AbstractImageMobject
 
     class Flashing(AbstractImageMobject):

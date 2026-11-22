@@ -16,10 +16,11 @@ from manim.constants import CapStyleType, LineJointType
 from manim.material import Unlit
 from manim.renderer._lighting import AMBIENT, Light, shade
 from manim.renderer._mesh import face_colors, face_normals, face_outlines, faces_of
+from manim.renderer._view import eye
 from manim.renderer.snapshot import RMesh, RNode, RPath, RSolid, Stroke
 
 if TYPE_CHECKING:
-    from manim.camera import Camera
+    from manim.renderer.protocol import CameraState
 
 __all__ = ["mesh_faces"]
 
@@ -28,7 +29,7 @@ _STROKE_WIDTH_UNIT = 0.01
 _UNLIT = Unlit()
 
 
-def mesh_faces(node: RNode, camera: Camera) -> list[RNode]:
+def mesh_faces(node: RNode, camera: CameraState) -> list[RNode]:
     """Path snapshots for the faces of a mesh node, from far to near.
 
     Each face node is keyed by the mesh node's key and the face's index, or has no key
@@ -44,19 +45,19 @@ def mesh_faces(node: RNode, camera: Camera) -> list[RNode]:
     # tetrahedron around the origin, it is the origin for all four.)
     centers = corners.mean(axis=1)
     colors = face_colors(mesh, faces)
-    light = camera._light()
+    light = camera.light
     if light is not None and not node.fixed_in_frame:
         colors[:, :3] = shade(
             colors[:, :3],
             face_normals(corners),
             centers,
-            camera._eye(),
+            eye(camera),
             [Light(light)],
             AMBIENT,
             mesh.material,
         )
     outlines = face_outlines(corners)
-    rotation = np.identity(3) if node.fixed_in_frame else camera._view_rotation()
+    rotation = np.identity(3) if node.fixed_in_frame else camera.rotation
     depth = centers @ rotation[2]
     strokes = np.asarray(mesh.stroke_rgbas, dtype=float)
     if len(strokes) != len(faces):

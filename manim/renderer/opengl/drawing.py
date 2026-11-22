@@ -21,11 +21,12 @@ import numpy as np
 from PIL.Image import Resampling
 
 from manim._config import config
-from manim.camera import ThreeDCamera
 from manim.material import Pbr
+from manim.renderer import _view
 from manim.renderer._lighting import AMBIENT, DEFAULT_LIGHT_INTENSITY
 from manim.renderer._mesh import faces_of
 from manim.renderer._paint import paint_colors, shows
+from manim.renderer.projection import project_points
 from manim.renderer.snapshot import (
     LegacyShaded,
     RCameraView,
@@ -41,7 +42,7 @@ from .shader import Shader
 from .winding_fill import WindingFill
 
 if TYPE_CHECKING:
-    from manim.camera import Camera
+    from manim.renderer.protocol import CameraState
     from manim.renderer.snapshot import Material
 
     from .renderer import OpenGLRenderer, _CameraView
@@ -291,7 +292,7 @@ class DrawTarget(NamedTuple):
     framebuffer: moderngl.Framebuffer
     #: Width and height in pixels.
     size: tuple[int, int]
-    camera: Camera
+    camera: CameraState
     view: _CameraView
     #: Camera uniforms of the shaders (see ``OpenGLRenderer.camera_uniforms``).
     uniforms: dict[str, Any]
@@ -431,8 +432,9 @@ class SnapshotDrawing:
             return "frame", None
         camera = self._base_target.camera
         center = node.fixed_orientation_center
-        if center is not None and isinstance(camera, ThreeDCamera):
-            return "frame", camera.project_point(center) - center
+        if center is not None and _view.is_3d(camera):
+            projected = project_points(camera, np.asarray(center).reshape((1, 3)))[0]
+            return "frame", projected - center
         return "normal", None
 
     def _placed_target(self, kind: str) -> DrawTarget:
@@ -440,11 +442,11 @@ class SnapshotDrawing:
         if target is None:
             base = self._base_target
             camera = base.camera
-            if isinstance(camera, ThreeDCamera):
+            if _view.is_3d(camera):
                 # Its view transform is centered at the origin with its frame size.
                 shape = (camera.frame_width, camera.frame_height)
             else:
-                width = float(config["frame_width"])
+                width = camera.default_frame_width
                 shape = (width, width * base.size[1] / base.size[0])
             view = base.view._replace(
                 center=np.zeros(3),
@@ -712,7 +714,13 @@ class SnapshotDrawing:
                 continue
             geometry.append(geo)
             widths.append(stroke.width)
-            colours.append(paint_colors(stroke.paint, path, camera._shaded_rgbas))
+            colours.append(
+                paint_colors(
+                    stroke.paint,
+                    path,
+                    lambda path, rgbas: _view.shaded_rgbas(camera, path, rgbas),
+                )
+            )
         if not geometry:
             return
         vertices = _stroke_vertices(geometry, widths, colours)

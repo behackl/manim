@@ -22,7 +22,7 @@ from manim.material import Pbr
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from manim.material import Material
+    from manim.renderer.snapshot import Material
 
 __all__ = [
     "AMBIENT",
@@ -92,7 +92,8 @@ def shade(
     ambient
         Intensity of the uniform white light.
     material
-        Only :class:`.Pbr` materials are lit.
+        Only :class:`.Pbr` materials are lit; any other material (also the
+        provisional :class:`.LegacyShaded` of snapshots) is left as it is.
 
     Returns
     -------

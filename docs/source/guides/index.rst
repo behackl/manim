@@ -10,6 +10,7 @@ Thematic Guides
    cameras
    opengl_mobjects_migration
    renderer_migration
+   writing_a_renderer
    evaluation
    timeline
    deep_dive

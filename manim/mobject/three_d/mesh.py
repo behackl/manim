@@ -11,7 +11,7 @@ under a :class:`.ThreeDCamera`'s light, :class:`.Unlit` shows its colors as they
 
 from __future__ import annotations
 
-__all__ = ["MeshMobject", "ParametricSurface"]
+__all__ = ["MeshMobject", "ParametricSurface", "PolygonFace"]
 
 import itertools as it
 from collections.abc import Callable, Iterable, Sequence
@@ -512,6 +512,35 @@ class ParametricSurface(MeshMobject):
         for v in vs:
             lines.add(VMobject().set_points_as_corners([self.func(u, v) for u in us]))
         return lines.set_stroke(color, stroke_width)
+
+
+class PolygonFace(MeshMobject):
+    """A flat polygon as a mesh: one face, its corners in order around it.
+
+    The faces of :class:`.Cube`, :class:`.Prism` and the polyhedra are of this kind.
+    Fill and outline are set as for other meshes.
+
+    Parameters
+    ----------
+    corners
+        The corners of the polygon, in order around it.
+    kwargs
+        Further arguments of :class:`MeshMobject`, for example ``color``, ``opacity``
+        or ``material``.
+    """
+
+    def __init__(self, *corners: Point3D, **kwargs: Any) -> None:
+        corners_array = np.asarray(corners, dtype=float)
+        count = len(corners_array)
+        # A fan of triangles from the first corner (the polygon is convex).
+        triangles = np.array([[0, i, i + 1] for i in range(1, count - 1)])
+        super().__init__(points=corners_array, triangles=triangles, **kwargs)
+        self.faces = np.arange(count)[None, :]
+
+    def set_corners(self, *corners: Point3D) -> Self:
+        """Move the corners of the polygon, keeping their number."""
+        self.points = np.asarray(corners, dtype=float)
+        return self
 
 
 def _interpolate_material(start: Material, end: Material, alpha: float) -> Material:

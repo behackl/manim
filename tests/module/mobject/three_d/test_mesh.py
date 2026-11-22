@@ -6,12 +6,16 @@ from manim import (
     RED,
     UP,
     WHITE,
+    Cube,
     Dot3D,
     Mobject,
     ParametricSurface,
+    PolygonFace,
+    Prism,
     Sphere,
     Square,
     Surface,
+    Tetrahedron,
     ThreeDAxes,
     VGroup,
     VMobject,
@@ -202,3 +206,40 @@ def test_groups_with_meshes_can_be_rotated_and_their_sheen_set():
     group.rotate(1.0).set_sheen_direction(UP)
 
     np.testing.assert_allclose(group[0].sheen_direction, UP)
+
+
+def test_cube_faces_are_lit_meshes_in_a_group():
+    cube = Cube(side_length=2, fill_color=RED)
+
+    assert len(cube) == 6
+    assert all(isinstance(face, PolygonFace) for face in cube)
+    assert all(face.material == Pbr() for face in cube)
+    np.testing.assert_allclose(cube.get_center(), 0, atol=1e-12)
+    assert cube.width == pytest.approx(2)
+    cube.set_color(BLUE)
+    assert cube[3].fill_color == BLUE
+
+
+def test_prisms_are_stretched_cubes():
+    prism = Prism(dimensions=[1, 2, 3])
+
+    assert (prism.width, prism.height, prism.depth) == pytest.approx((1, 2, 3))
+
+
+def test_polyhedron_faces_follow_their_vertices_and_keep_their_style():
+    tetrahedron = Tetrahedron(faces_config={"fill_color": RED, "fill_opacity": 0.3})
+    face = tetrahedron.faces[0]
+
+    assert isinstance(face, PolygonFace)
+    assert face.fill_color == RED
+    assert face.fill_opacity == pytest.approx(0.3)
+    # Outlined in the face's color, as the Polygon faces were.
+    assert face.stroke_color == RED
+    assert face.stroke_width == 4
+
+    tetrahedron.graph[0].shift(UP)
+    tetrahedron.update()
+    first_corner = tetrahedron.faces_list[0].index(0)
+    np.testing.assert_allclose(
+        face.points[first_corner], tetrahedron.graph[0].get_center()
+    )
